@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { organizationScopeClause } from "../../shared/middleware/tenant.middleware.js";
 
 const LEGACY_DEMO_NOTIFICATION_IDS = new Set(["n1", "n2", "n3", "n4"]);
@@ -48,6 +49,43 @@ export async function listNotifications(pool, { userId, organizationId, includeR
   );
 
   return result.rows.map(toUiNotification).filter(Boolean);
+}
+
+export async function createShipmentCreatedNotifications(client, {
+  organizationId,
+  creatorUserId,
+  shipmentId,
+  shipmentCode,
+} = {}) {
+  const recipients = await client.query(
+    `SELECT id
+     FROM app_users
+     WHERE organization_id = $1
+       AND status = 'active'
+       AND id <> $2
+       AND COALESCE(notification_preferences->>'shipmentUpdates', 'true') <> 'false'`,
+    [organizationId, creatorUserId]
+  );
+
+  for (const recipient of recipients.rows) {
+    await client.query(
+      `INSERT INTO notifications (
+         id, organization_id, user_id, title, body, type, source_type, source_id, legacy_data, created_at
+       )
+       VALUES ($1, $2, $3, $4, $5, 'INFO', 'SHIPMENT', $6, $7::jsonb, NOW())`,
+      [
+        crypto.randomUUID(),
+        organizationId,
+        recipient.id,
+        "محموله جدید ثبت شد",
+        `محموله ${shipmentCode} به سامانه اضافه شد.`,
+        shipmentId,
+        JSON.stringify({ link: `/shipments/${shipmentId}` }),
+      ]
+    );
+  }
+
+  return recipients.rowCount;
 }
 
 export async function markNotificationRead(pool, notificationId, { userId, organizationId } = {}) {

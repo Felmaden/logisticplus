@@ -50,7 +50,7 @@ test.describe.serial("Parsrah showcase company", () => {
     const customers = await readOk<any[]>(await manager.get("/api/customers"));
     expect(customers).toHaveLength(5);
     expect(customers.map((customer) => customer.customerCode)).toContain("prs-customer-nikan");
-    expect(customers.map((customer) => customer.company)).toContain("prs-customer-nikan");
+    expect(customers.map((customer) => customer.company)).toContain("شرکت تجهیزات پزشکی نیکان‌طب");
 
     const shipments = await readOk<any[]>(await manager.get("/api/shipments"));
     expect(shipments).toHaveLength(10);

@@ -247,6 +247,40 @@
   }
 }
 
+.urgent-pulse {
+  position: relative;
+  box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.12), 0 8px 22px rgba(244, 63, 94, 0.1);
+}
+
+.urgent-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border: 1px solid rgba(244, 63, 94, 0.35);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: urgent-pulse 1.8s ease-out infinite;
+}
+
+@keyframes urgent-pulse {
+  0% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.035);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .urgent-pulse::after {
+    animation: none;
+    opacity: 0;
+  }
+}
+
 @keyframes login-hero-port-zoom {
   0%,
   100% {

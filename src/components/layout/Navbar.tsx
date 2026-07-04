@@ -197,6 +197,7 @@ export function TopBar() {
   const currentUser = useAppStore(state => state.currentUser);
   const setCurrentUser = useAppStore(state => state.setCurrentUser);
   const notifications = useAppStore(state => state.notifications);
+  const refreshNotifications = useAppStore(state => state.refreshNotifications);
   const markNotificationRead = useAppStore(state => state.markNotificationRead);
   const markAllNotificationsRead = useAppStore(state => state.markAllNotificationsRead);
   const navigate = useNavigate();
@@ -237,6 +238,22 @@ export function TopBar() {
     }, 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshNotifications().catch((error) => {
+        console.error("Could not refresh notifications.", error);
+      });
+    };
+    const timer = window.setInterval(refresh, 30_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [currentUser?.id, refreshNotifications]);
 
   const dateString = format(currentTime, "EEEE، d MMMM yyyy");
   const timeString = format(currentTime, "HH:mm");

@@ -280,7 +280,12 @@ export default function Customers() {
     }
   };
 
-  const activeCustomers = React.useMemo(() => customers.filter((customer) => !customer.isArchived), [customers]);
+  const activeCustomers = React.useMemo(() => customers
+    .filter((customer) => !customer.isArchived)
+    .sort((a, b) => (
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      || b.id.localeCompare(a.id)
+    )), [customers]);
   const filteredCustomers = React.useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return activeCustomers;

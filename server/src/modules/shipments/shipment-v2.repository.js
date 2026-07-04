@@ -9,6 +9,7 @@ import {
 } from "../../../../src/server/shipment-codes.js";
 import { assertBusinessEntityBelongsToTenant } from "../business-entities/business-entity.repository.js";
 import { normalizeShipmentStatus } from "../../../../src/shared/shipment-statuses.js";
+import { createShipmentCreatedNotifications } from "../notifications/notification.repository.js";
 import {
   applyKootajOperationUpdates,
   hasKootajOperationUpdates,
@@ -431,6 +432,13 @@ export async function createShipmentV2Record(pool, {
           actorUserId || ownerUserId,
         ]
       );
+
+      await createShipmentCreatedNotifications(client, {
+        organizationId: scopedOrganizationId,
+        creatorUserId: actorUserId || ownerUserId,
+        shipmentId,
+        shipmentCode,
+      });
 
       return composeProfileResponse({
         shipment: {

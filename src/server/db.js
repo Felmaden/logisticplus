@@ -37,6 +37,7 @@ import {
   listCustomersDetailed as listCustomersDetailedFromRepository,
   toUiCustomer as toUiCustomerFromRepository,
 } from "../../server/src/modules/customers/customer.repository.js";
+import { createShipmentCreatedNotifications } from "../../server/src/modules/notifications/notification.repository.js";
 import {
   listExitedShipmentRecords as listExitedShipmentRecordsFromRepository,
   getShipmentOperationalRecord as getShipmentOperationalRecordFromRepository,
@@ -1478,6 +1479,12 @@ export async function createShipmentRecord({ ownerUserId, actorUserId, organizat
         actorUserId || ownerUserId,
       ]
     );
+    await createShipmentCreatedNotifications(client, {
+      organizationId: scopedOrganizationId,
+      creatorUserId: actorUserId || ownerUserId,
+      shipmentId: id,
+      shipmentCode: codeParts.shipmentCode,
+    });
     await client.query("COMMIT");
     const savedShipment = toUiShipment(
       {
@@ -5999,6 +6006,12 @@ export async function convertQuotationToShipment(id, actorUserId, { organization
       [id, shipmentId, scopedOrganizationId]
     );
     await syncQuoteUserRecord(client, quote.owner_user_id, updated.rows[0]);
+    await createShipmentCreatedNotifications(client, {
+      organizationId: scopedOrganizationId,
+      creatorUserId: actorUserId || quote.owner_user_id,
+      shipmentId,
+      shipmentCode,
+    });
     await client.query("COMMIT");
     return {
       quote: toUiQuote(updated.rows[0], { includeCustomerPrivateDetails }),

@@ -21,6 +21,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { 
@@ -62,16 +63,17 @@ import { motion, AnimatePresence } from "motion/react";
 import { DeleteConfirmDialog } from "@/src/components/DeleteConfirmDialog";
 import { toast } from "sonner";
 import { EmptyState, resetFiltersAction } from "@/src/components/EmptyState";
+import { AnimatedNumber } from "@/src/components/AnimatedNumber";
 import { getShamsiDatePart, getTehranTimePart, ShamsiDateTimeField } from "@/src/components/ShamsiDateTimeField";
 import { TaskAssignmentHistory } from "@/src/components/tasks/TaskAssignmentHistory";
 import type { TaskEvent } from "@/src/types";
 
 const PriorityBadge = ({ priority }: { priority: string }) => {
   const styles: Record<string, string> = {
-    LOW: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-    MEDIUM: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    HIGH: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-    URGENT: "bg-rose-500/10 text-rose-500 border-rose-500/20 shadow-[0_0_10px_rgba(244,63,94,0.1)]",
+    LOW: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25 dark:text-emerald-300",
+    MEDIUM: "bg-sky-500/10 text-sky-700 border-sky-500/25 dark:text-sky-300",
+    HIGH: "bg-amber-500/10 text-amber-700 border-amber-500/25 dark:text-amber-300",
+    URGENT: "bg-rose-500/10 text-rose-700 border-rose-500/30 dark:text-rose-300",
   };
   const labels: Record<string, string> = {
     LOW: "عادی",
@@ -79,12 +81,39 @@ const PriorityBadge = ({ priority }: { priority: string }) => {
     HIGH: "مهم",
     URGENT: "فوری",
   };
+  const isUrgent = priority === "URGENT";
   return (
-    <Badge variant="outline" className={cn(styles[priority] || "", "text-[11px] font-black px-2 py-0.5 h-5 border leading-none")}>
+    <Badge variant="outline" className={cn(styles[priority] || "", "text-[11px] font-black px-2 py-0.5 h-5 border leading-none", isUrgent && "urgent-pulse")}>
       {labels[priority] || priority}
     </Badge>
   );
 };
+
+function TaskListSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" data-testid="tasks-list-skeleton">
+      {Array.from({ length: 5 }).map((_, index) => (
+        <Card key={index} className="rounded-xl border-slate-200 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-border/90 dark:bg-card dark:shadow-[0_10px_24px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0 flex-1 space-y-3">
+              <div className="flex items-center gap-3">
+                <Skeleton className="h-4 w-48 max-w-[55vw]" />
+                <Skeleton className="h-5 w-16 rounded-lg" />
+              </div>
+              <Skeleton className="h-3 w-72 max-w-[70vw]" />
+            </div>
+            <div className="grid shrink-0 grid-cols-2 gap-4 lg:flex lg:items-center lg:gap-8">
+              <Skeleton className="h-9 w-20 rounded-lg" />
+              <Skeleton className="h-9 w-24 rounded-lg" />
+              <Skeleton className="h-9 w-28 rounded-lg" />
+              <Skeleton className="h-9 w-28 rounded-lg" />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
 
 function shipmentCustomerCode(shipment: any) {
   return shipment?.customerCode || shipment?.customerId || shipment?.customerName || "";
@@ -111,20 +140,21 @@ const TaskListItem = ({
   const linkedShipment = React.useMemo(() => shipments.find(s => s.id === task.shipmentId), [shipments, task.shipmentId]);
 
   const statusConfig = {
-    TODO: { label: "در انتظار", color: "text-muted-foreground bg-muted border-border" },
-    ASSIGNED: { label: "ارجاع شده", color: "text-blue-500 bg-blue-500/10 border-blue-500/20" },
-    IN_PROGRESS: { label: "در حال انجام", color: "text-primary bg-primary/10 border-primary/20" },
-    WAITING: { label: "در انتظار", color: "text-amber-500 bg-amber-500/10 border-amber-500/20" },
-    DONE: { label: "تکمیل شده", color: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20" }
+    TODO: { label: "در انتظار", color: "text-slate-700 bg-slate-100 border-slate-300 dark:text-slate-300 dark:bg-slate-900/50 dark:border-slate-800" },
+    ASSIGNED: { label: "ارجاع شده", color: "text-sky-700 bg-sky-500/10 border-sky-500/25 dark:text-sky-300" },
+    IN_PROGRESS: { label: "در حال انجام", color: "text-primary bg-primary/10 border-primary/25" },
+    WAITING: { label: "در انتظار", color: "text-amber-700 bg-amber-500/10 border-amber-500/25 dark:text-amber-300" },
+    DONE: { label: "تکمیل شده", color: "text-emerald-700 bg-emerald-500/10 border-emerald-500/25 dark:text-emerald-300" }
   };
 
   const extendedStatusConfig = {
     ...statusConfig,
-    BLOCKED: { label: "مسدود", color: "text-rose-600 bg-rose-500/10 border-rose-500/20" },
-    CANCELLED: { label: "لغو شده", color: "text-slate-500 bg-slate-100 border-slate-300" }
+    BLOCKED: { label: "مسدود", color: "text-rose-700 bg-rose-500/10 border-rose-500/25 dark:text-rose-300" },
+    CANCELLED: { label: "لغو شده", color: "text-slate-600 bg-slate-100 border-slate-300 dark:text-slate-300 dark:bg-slate-900/50 dark:border-slate-800" }
   };
 
   const config = extendedStatusConfig[task.status] || extendedStatusConfig.TODO;
+  const isUrgent = task.priority === "URGENT";
 
   return (
     <motion.div 
@@ -133,11 +163,16 @@ const TaskListItem = ({
       exit={{ opacity: 0, x: -20 }}
       className="group"
     >
-      <div className="flex flex-col md:flex-row md:items-center gap-4 bg-card border border-border hover:border-primary/30 hover:bg-muted/40 p-4 rounded-xl transition-all shadow-sm">
+      <div
+        className={cn(
+          "flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-[0_16px_34px_rgba(15,23,42,0.12)] md:flex-row md:items-center dark:border-border/90 dark:bg-card dark:shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:hover:border-primary/35 dark:hover:bg-muted/35 dark:hover:shadow-[0_16px_34px_rgba(37,99,235,0.11)]",
+          isUrgent && "urgent-pulse border-rose-300/80 bg-rose-50/80 dark:bg-rose-950/20"
+        )}
+      >
         {/* Title & Description Column */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-3 mb-1">
-            <h4 className="text-sm font-bold text-foreground truncate group-hover:text-primary transition-colors">
+            <h4 className="text-sm font-bold text-slate-950 transition-colors group-hover:text-primary dark:text-foreground">
               {task.title}
             </h4>
             <Badge variant="outline" className={cn("text-[11px] font-black px-2 py-0.5 h-5 border leading-none shrink-0", config.color)}>
@@ -180,7 +215,7 @@ const TaskListItem = ({
                   {assignedUser?.name?.[0] || '؟'}
                 </AvatarFallback>
               </Avatar>
-              <span className="text-xs font-bold text-foreground truncate">{assignedUser?.name || "بدون مشخص"}</span>
+              <span className="truncate text-xs font-bold text-slate-800 dark:text-foreground">{assignedUser?.name || "بدون مشخص"}</span>
             </div>
           </div>
 
@@ -207,6 +242,7 @@ const TaskListItem = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="تکمیل وظیفه"
                 className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-500"
                 onClick={() => onStatusChange(task, "DONE")}
               >
@@ -217,6 +253,7 @@ const TaskListItem = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="شروع وظیفه"
                 className="h-8 w-8 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary"
                 onClick={() => onStatusChange(task, "IN_PROGRESS")}
               >
@@ -226,6 +263,7 @@ const TaskListItem = ({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="تاریخچه وظیفه"
               className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
               onClick={() => onHistory(task)}
             >
@@ -234,6 +272,7 @@ const TaskListItem = ({
             <Button 
               variant="ghost" 
               size="icon" 
+              aria-label="ویرایش وظیفه"
               className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted"
               onClick={() => onEdit(task)}
             >
@@ -242,6 +281,7 @@ const TaskListItem = ({
             <Button 
               variant="ghost" 
               size="icon" 
+              aria-label="حذف وظیفه"
               className="h-8 w-8 rounded-lg text-muted-foreground hover:text-rose-500 hover:bg-rose-500/10"
               onClick={() => onDelete(task.id)}
             >
@@ -277,6 +317,7 @@ export default function Tasks() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [historyTask, setHistoryTask] = useState<Task | null>(null);
   const [historyEvents, setHistoryEvents] = useState<TaskEvent[]>([]);
+  const [isTasksLoading, setIsTasksLoading] = useState(true);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
@@ -290,12 +331,25 @@ export default function Tasks() {
   });
 
   useEffect(() => {
-    refreshTasks().catch((error) => {
-      console.error("Could not refresh tasks.", error);
-    });
-    fetchOrganizationMembers().catch((error) => {
-      console.error("Could not load organization members.", error);
-    });
+    let isMounted = true;
+    setIsTasksLoading(true);
+
+    Promise.allSettled([refreshTasks(), fetchOrganizationMembers()])
+      .then(([tasksResult, membersResult]) => {
+        if (tasksResult.status === "rejected") {
+          console.error("Could not refresh tasks.", tasksResult.reason);
+        }
+        if (membersResult.status === "rejected") {
+          console.error("Could not load organization members.", membersResult.reason);
+        }
+      })
+      .finally(() => {
+        if (isMounted) setIsTasksLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [refreshTasks, fetchOrganizationMembers]);
 
   const assigneeOptions = useMemo(() => {
@@ -432,10 +486,10 @@ export default function Tasks() {
     <div className="app-page min-h-full flex flex-col gap-5 font-sans" dir="rtl">
       {/* Header & Stats Dashboard */}
       <div className="flex flex-col gap-4 shrink-0">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-border bg-card p-4 md:p-5 shadow-sm">
+        <div className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-[0_12px_30px_rgba(15,23,42,0.08)] sm:flex-row sm:items-center md:p-5 dark:border-border/90 dark:bg-card dark:shadow-[0_12px_28px_rgba(15,23,42,0.07)]">
           <div className="space-y-1.5">
             <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight">لیست وظایف عملیاتی</h1>
-            <p className="text-muted-foreground text-xs md:text-sm font-medium">پایش و مدیریت هوشمند تمام وظایف پرسنل در یک نگاه.</p>
+            <p className="text-xs font-medium text-slate-600 md:text-sm dark:text-muted-foreground">پایش و مدیریت هوشمند تمام وظایف پرسنل در یک نگاه.</p>
           </div>
           <Button data-testid="open-task-dialog" onClick={handleOpenAdd} className="bg-primary hover:bg-primary/90 text-primary-foreground font-black h-10 px-5 rounded-xl shadow-sm transition-all active:scale-95 text-xs">
             <Plus className="w-5 h-5 ml-2 stroke-[3]" />
@@ -451,17 +505,14 @@ export default function Tasks() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.1, duration: 0.4 }}
             >
-              <Card className="bg-card border-border rounded-xl p-4 relative overflow-hidden group hover:bg-muted/40 transition-all shadow-sm">
-                <div className={cn("absolute -right-4 -bottom-4 opacity-5 scale-150 transition-all group-hover:scale-125 group-hover:rotate-12", stat.color)}>
-                  <stat.icon className="w-20 h-20" />
-                </div>
-                <div className="flex items-center gap-4 relative z-10">
-                  <div className={cn("p-2.5 rounded-2xl", stat.bg)}>
+              <Card className="relative rounded-xl border-slate-200 bg-white p-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 hover:shadow-[0_16px_34px_rgba(15,23,42,0.12)] dark:border-border/90 dark:bg-card dark:shadow-[0_10px_24px_rgba(15,23,42,0.06)] dark:hover:border-primary/35 dark:hover:bg-muted/35 dark:hover:shadow-[0_16px_34px_rgba(37,99,235,0.11)]">
+                <div className="relative z-10 flex items-center gap-4">
+                  <div className={cn("rounded-xl border border-border/60 p-2.5", stat.bg)}>
                     <stat.icon className={cn("w-5 h-5", stat.color)} />
                   </div>
                   <div>
-                    <p className="text-xs font-bold text-muted-foreground">{stat.label}</p>
-                    <p className="text-2xl font-black text-foreground">{stat.value}</p>
+                    <p className="text-xs font-bold text-slate-600 dark:text-muted-foreground">{stat.label}</p>
+                    <AnimatedNumber value={stat.value} className="block text-2xl font-black text-slate-950 dark:text-foreground" />
                   </div>
                 </div>
               </Card>
@@ -476,13 +527,13 @@ export default function Tasks() {
           <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-muted-foreground group-focus-within:text-primary transition-colors" />
           <Input 
             placeholder="جستجوی در عنوان یا شرح وظایف..." 
-            className="bg-card border-border h-12 pr-12 focus:ring-2 focus:ring-primary/20 rounded-2xl w-full text-sm" 
+            className="h-12 w-full rounded-2xl border-slate-200 bg-white pr-12 text-sm shadow-[0_8px_20px_rgba(15,23,42,0.06)] focus:ring-2 focus:ring-primary/20 dark:border-border dark:bg-card"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
         
-        <div className="flex flex-wrap items-center gap-3 bg-card p-1.5 rounded-xl border border-border shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_8px_20px_rgba(15,23,42,0.06)] dark:border-border dark:bg-card dark:shadow-sm">
           <div className="flex gap-1 border-l border-border pl-2">
             {[
               { id: "ALL", label: "همه وضعیت‌ها" },
@@ -528,7 +579,7 @@ export default function Tasks() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-2 shadow-sm">
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-[0_8px_20px_rgba(15,23,42,0.06)] dark:border-border dark:bg-card dark:shadow-sm">
         {[
           { id: "all", label: "همه وظایف" },
           { id: "assignedToMe", label: "وظایف ارجاع شده به من" },
@@ -555,36 +606,40 @@ export default function Tasks() {
       {/* Task List Content */}
       <div className="flex-1">
         <div className="flex flex-col gap-3">
-          <AnimatePresence mode="popLayout">
-            {filteredTasks.length > 0 ? (
-              filteredTasks.map(task => (
-                <TaskListItem 
-                  key={task.id} 
-                  task={task} 
-                  onEdit={handleEdit} 
-                  onDelete={(id) => {
-                    setTaskToDelete(id);
-                    setIsDeleteDialogOpen(true);
-                  }}
-                  onStatusChange={handleTaskStatusChange}
-                  onHistory={handleOpenHistory}
-                />
-              ))
-            ) : (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="bg-card rounded-xl"
-              >
-                <EmptyState
-                  icon={Layout}
-                  title={allTasks.length === 0 ? "هنوز وظیفه‌ای تعریف نشده" : "وظیفه‌ای با این فیلترها پیدا نشد"}
-                  description={allTasks.length === 0 ? "اولین فعالیت عملیاتی را برای پیگیری ترخیص، اسناد، تماس یا تحویل بسازید." : "وضعیت، اولویت یا عبارت جستجو را تغییر دهید تا وظایف موجود نمایش داده شوند."}
-                  primaryAction={allTasks.length === 0 ? { label: "تعریف وظیفه جدید", onClick: handleOpenAdd, icon: Plus } : resetFiltersAction(resetTaskFilters)}
-                />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {isTasksLoading ? (
+            <TaskListSkeleton />
+          ) : (
+            <AnimatePresence mode="popLayout">
+              {filteredTasks.length > 0 ? (
+                filteredTasks.map(task => (
+                  <TaskListItem
+                    key={task.id}
+                    task={task}
+                    onEdit={handleEdit}
+                    onDelete={(id) => {
+                      setTaskToDelete(id);
+                      setIsDeleteDialogOpen(true);
+                    }}
+                    onStatusChange={handleTaskStatusChange}
+                    onHistory={handleOpenHistory}
+                  />
+                ))
+              ) : (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="rounded-xl bg-white shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:bg-card dark:shadow-[0_10px_24px_rgba(15,23,42,0.06)]"
+                >
+                  <EmptyState
+                    icon={Layout}
+                    title={allTasks.length === 0 ? "همه چیز مرتب است." : "نتیجه‌ای برای این فیلترها نیست."}
+                    description={allTasks.length === 0 ? "در حال حاضر وظیفه فوری یا باز برای تیم شما ثبت نشده است." : "عبارت جستجو، وضعیت یا اولویت را کمی تغییر دهید تا وظایف مرتبط دوباره دیده شوند."}
+                    primaryAction={allTasks.length === 0 ? { label: "تعریف وظیفه جدید", onClick: handleOpenAdd, icon: Plus } : resetFiltersAction(resetTaskFilters)}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          )}
         </div>
       </div>
 

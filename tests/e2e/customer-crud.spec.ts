@@ -285,4 +285,36 @@ test.describe.serial("customer code sorting", () => {
       await disposeContexts(owner);
     }
   });
+
+  test("shows the newest submitted customer first on the customers page", async ({ page }) => {
+    const owner = await loginApi();
+    const creationOrder = [sortTestCustomers[2], sortTestCustomers[0], sortTestCustomers[1]];
+    try {
+      for (const customer of creationOrder) {
+        await readOk(
+          await owner.post("/api/customers", {
+            data: {
+              customerCode: customer.customerCode,
+              name: customer.customerName,
+              company: customer.companyName,
+              email: customer.email,
+              phone: "09125550000",
+            },
+          })
+        );
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      await loginViaUi(page);
+      await page.goto("/customers");
+      const visibleCodes = async () => (await page.locator("tbody tr").allTextContents())
+        .flatMap((text) => sortTestCustomers.filter((customer) => text.includes(customer.customerCode)).map((customer) => customer.customerCode));
+
+      await expect.poll(visibleCodes).toEqual(["E2E-SORT-2", "E2E-SORT-10", "E2E-SORT-001"]);
+      await page.locator(".app-page input").first().fill("E2E-SORT");
+      await expect.poll(visibleCodes).toEqual(["E2E-SORT-2", "E2E-SORT-10", "E2E-SORT-001"]);
+    } finally {
+      await disposeContexts(owner);
+    }
+  });
 });

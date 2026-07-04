@@ -2,10 +2,13 @@ import { expect, test } from "@playwright/test";
 import crypto from "node:crypto";
 import pg from "pg";
 import {
+  USER_PASSWORD,
   disposeContexts,
   expectUnavailable,
   loginApi,
+  nextValidShipmentCode,
   readOk,
+  uniqueEmail,
 } from "./helpers";
 
 const { Client } = pg;
@@ -60,6 +63,14 @@ async function insertNotification(
       read ? new Date() : null,
     ]
   );
+}
+
+async function createCompanyUser(owner: Awaited<ReturnType<typeof loginApi>>, prefix: string) {
+  const email = uniqueEmail(prefix.toLowerCase().replace(/\s+/g, "-"));
+  const user = await readOk<any>(await owner.post("/api/users", {
+    data: { name: prefix, email, password: USER_PASSWORD, role: "OPERATIONS" },
+  }));
+  return { id: user.id, email };
 }
 
 test.describe.serial("notifications API", () => {
@@ -166,6 +177,103 @@ test.describe.serial("notifications API", () => {
       const persisted = await client.query("SELECT read_at FROM notifications WHERE id = $1", [notificationId]);
       expect(persisted.rows[0]?.read_at).toBeFalsy();
     } finally {
+      await disposeContexts(owner);
+    }
+  });
+
+  test("notifies eligible coworkers when legacy and V2 shipments are created", async () => {
+    const owner = await loginApi();
+    const eligible = await createCompanyUser(owner, "E2E shipment notification eligible");
+    const optedOut = await createCompanyUser(owner, "E2E shipment notification opted out");
+    const inactive = await createCompanyUser(owner, "E2E shipment notification inactive");
+    const shipmentIds: string[] = [];
+    let customerId = "";
+    try {
+      await client.query(
+        `UPDATE app_users
+         SET notification_preferences = CASE
+           WHEN id = $1 THEN '{"shipmentUpdates":false}'::jsonb
+           ELSE notification_preferences
+         END,
+         status = CASE WHEN id = $2 THEN 'suspended' ELSE status END
+         WHERE id = ANY($3::text[])`,
+        [optedOut.id, inactive.id, [optedOut.id, inactive.id]]
+      );
+
+      const customer = await readOk<any>(await owner.post("/api/customers", {
+        data: {
+          name: "E2E shipment notification customer",
+          company: "E2E shipment notification company",
+          email: uniqueEmail("e2e-shipment-notification-customer"),
+          phone: "09120000000",
+        },
+      }));
+      customerId = customer.id;
+
+      const legacy = await readOk<any>(await owner.post("/api/shipments", {
+        data: {
+          trackingNumber: await nextValidShipmentCode(),
+          customerId,
+          origin: "Dubai",
+          destination: "Tehran",
+        },
+      }));
+      shipmentIds.push(legacy.id);
+
+      const v2 = await readOk<any>(await owner.post("/api/shipments/v2", {
+        data: {
+          flowCode: "IMPORT_SHIP",
+          customerId,
+          origin: "Dubai",
+          dischargePort: "Bandar Abbas",
+          deliveryPort: "Tehran",
+        },
+      }));
+      shipmentIds.push(v2.shipment.id);
+
+      const rows = await client.query(
+        `SELECT user_id, source_id, title, body, legacy_data
+         FROM notifications
+         WHERE source_type = 'SHIPMENT' AND source_id = ANY($1::text[])`,
+        [shipmentIds]
+      );
+      const eligibleRows = rows.rows.filter((row) => row.user_id === eligible.id);
+      expect(eligibleRows).toHaveLength(2);
+      expect(eligibleRows.map((row) => row.source_id).sort()).toEqual([...shipmentIds].sort());
+      expect(rows.rows.every((row) => row.title === "محموله جدید ثبت شد")).toBe(true);
+      expect(rows.rows.every((row) => row.body.includes("محموله") && !row.body.includes("customer"))).toBe(true);
+      expect(rows.rows.every((row) => row.legacy_data.link === `/shipments/${row.source_id}`)).toBe(true);
+
+      const eligibleApi = await loginApi(eligible.email, USER_PASSWORD);
+      try {
+        const notifications = await readOk<any[]>(await eligibleApi.get("/api/notifications?includeRead=true&limit=50"));
+        for (const shipmentId of shipmentIds) {
+          expect(notifications).toContainEqual(expect.objectContaining({
+            title: "محموله جدید ثبت شد",
+            link: `/shipments/${shipmentId}`,
+            isRead: false,
+          }));
+        }
+      } finally {
+        await disposeContexts(eligibleApi);
+      }
+
+      expect(rows.rows.some((row) => row.user_id === "u1")).toBe(false);
+      expect(rows.rows.some((row) => row.user_id === optedOut.id)).toBe(false);
+      expect(rows.rows.some((row) => row.user_id === inactive.id)).toBe(false);
+      expect(rows.rows.some((row) => row.user_id === otherUserId)).toBe(false);
+    } finally {
+      if (shipmentIds.length) {
+        await client.query("DELETE FROM notifications WHERE source_id = ANY($1::text[])", [shipmentIds]);
+        await client.query("DELETE FROM shipments WHERE id = ANY($1::text[])", [shipmentIds]);
+      }
+      if (customerId) await client.query("DELETE FROM customers WHERE id = $1", [customerId]);
+      await client.query(
+        `UPDATE app_users
+         SET status = 'suspended', email = CONCAT('archived-', id, '-', email)
+         WHERE id = ANY($1::text[])`,
+        [[eligible.id, optedOut.id, inactive.id]]
+      );
       await disposeContexts(owner);
     }
   });
