@@ -51,7 +51,7 @@ function customerOptionLabel(customer: Customer) {
 }
 
 function shipmentCustomerCode(shipment: ExitedShipment) {
-  return shipment.customerCode || shipment.customerId || shipment.customerDisplayName || shipment.customerName || "";
+  return shipment.customerDisplayName || shipment.customerName || shipment.customerCode || shipment.customerId || "";
 }
 
 export default function ExitedShipments() {

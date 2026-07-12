@@ -58,7 +58,7 @@ const StatusBadge = ({ status }: { status: string }) => {
 };
 
 const shipmentCustomerDisplay = (shipment: Shipment) =>
-  shipment.customerCode || shipment.customerName || shipment.customerId || "";
+  shipment.customerName || shipment.customerCode || shipment.customerId || "";
 
 const shipmentOriginDisplay = (shipment: Shipment) => shipment.origin || "";
 

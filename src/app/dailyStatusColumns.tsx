@@ -87,7 +87,7 @@ export const dailyStatusColumns: DailyStatusColumn[] = [
     editable: false,
     width: "w-[140px] min-w-[140px]",
     priority: "primary",
-    read: (row) => row.baseInfo?.customerCode || row.customer?.customerCode || row.customer?.id || row.customer?.name || "",
+    read: (row) => row.baseInfo?.customerName || row.customer?.name || row.baseInfo?.customerCode || row.customer?.customerCode || row.customer?.id || "",
     linkedRoute: (row) => row.links.customerDetailUrl,
   },
   {

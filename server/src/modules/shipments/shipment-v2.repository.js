@@ -227,12 +227,15 @@ function toShipmentSummary(row, { includeCustomerPrivateDetails = true } = {}) {
   if (!row) return null;
   const legacy = row.legacy_data || {};
   const customerCode = row.customer_code || legacy.customerCode || legacy.customer_code || row.customer_id || legacy.customerId || "";
+  const customerName = includeCustomerPrivateDetails
+    ? String(row.customer_display_name || row.customer_name || legacy.customerName || customerCode || "").trim()
+    : customerCode;
   return {
     id: row.id,
     trackingNumber: row.shipment_code || row.id,
     customerId: row.customer_id || "",
     customerCode,
-    customerName: customerCode,
+    customerName,
     status: normalizeShipmentStatus(row.status),
     shipmentDirection: row.shipment_direction || "import",
     transportMode: row.transport_mode || "",

@@ -10,6 +10,7 @@ import {
   getDailyStatusBoardRows,
   updateDailyStatusRow,
 } from "./daily-status.repository.js";
+import { canViewCustomerPrivateDetails } from "../customers/customer.repository.js";
 
 function isDailyStatusSchemaMissing(error) {
   return (
@@ -41,7 +42,7 @@ export function registerDailyStatusRoutes(
       const data = await getDailyStatusBoardRows(pool, {
         organizationId,
         filters: query,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       res.json({ ok: true, data });
     } catch (error) {
@@ -70,7 +71,7 @@ export function registerDailyStatusRoutes(
       const data = await getDailyStatusBoardRow(pool, {
         organizationId,
         shipmentId: params.shipmentId,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!data) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       res.json({ ok: true, data });
@@ -106,7 +107,7 @@ export function registerDailyStatusRoutes(
           shipmentId: params.shipmentId,
           actorUserId: user.id,
           updates: body,
-          includeCustomerPrivateDetails: user.role === "CEO",
+          includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
         });
         if (!result) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
 

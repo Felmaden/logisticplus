@@ -43,6 +43,7 @@ type DashboardShipment = {
   id: string;
   shipmentCode: string;
   customerCode?: string;
+  customerName?: string;
   status: string;
   destination?: string;
   estimatedDelivery?: string;
@@ -356,7 +357,7 @@ function LastShipmentsPanel({ shipments }: { shipments: DashboardShipment[] }) {
                 >
                   <span className="min-w-0">
                     <span className="block truncate font-mono text-sm font-black text-primary">{shipment.shipmentCode}</span>
-                    <span className="mt-1 block truncate text-xs font-bold text-slate-600 dark:text-muted-foreground">{shipment.customerCode || "بدون کد مشتری"}</span>
+                    <span className="mt-1 block truncate text-xs font-bold text-slate-600 dark:text-muted-foreground">{shipment.customerName || shipment.customerCode || "بدون مشتری"}</span>
                   </span>
                   <span className="truncate text-xs font-bold text-slate-600 dark:text-muted-foreground">{shipment.destination || "مقصد ثبت نشده"}</span>
                   <Badge variant="outline" className={cn("h-6 w-fit rounded-lg text-[11px] font-black", shipmentStatusTone(shipment.status))}>

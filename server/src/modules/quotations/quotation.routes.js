@@ -1,4 +1,5 @@
 import { registerQuotationReadRoutes } from "./quotation-read.routes.js";
+import { canViewCustomerPrivateDetails } from "../customers/customer.repository.js";
 
 export function registerQuotationRoutes(
   app,
@@ -36,7 +37,7 @@ export function registerQuotationRoutes(
         actorUserId: user.id,
         tenantContext,
         quote: req.body,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       await auditLog({
         actorUserId: user.id,
@@ -64,7 +65,7 @@ export function registerQuotationRoutes(
       await requirePermission(user, "quotations.manage");
       const result = await updateQuotationRecord(req.params.id, req.body || {}, {
         organizationId,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result.after) return createApiError(res, 404, "NOT_FOUND", "Quotation was not found.");
       await auditLog({
@@ -93,7 +94,7 @@ export function registerQuotationRoutes(
         await requirePermission(user, "quotations.manage");
         const result = await setQuotationStatus(req.params.id, status, req.body || {}, {
           organizationId,
-          includeCustomerPrivateDetails: user.role === "CEO",
+          includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
         });
         if (!result.after) return createApiError(res, 404, "NOT_FOUND", "Quotation was not found.");
         await auditLog({
@@ -122,7 +123,7 @@ export function registerQuotationRoutes(
       await requirePermission(user, "quotations.manage");
       const result = await convertQuotationToShipment(req.params.id, user.id, {
         organizationId,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result) return createApiError(res, 404, "NOT_FOUND", "Quotation was not found.");
       await auditLog({

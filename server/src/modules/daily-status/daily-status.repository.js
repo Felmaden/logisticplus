@@ -126,7 +126,9 @@ function composeBaseInfo(row, { commercialCard, workflow, includeCustomerPrivate
     ? normalizeText(base.malvaniDisplayName || base.malvaniProfileId)
     : normalizeText(base.commercialCardDisplayName || commercialCard?.displayName || row.kootaj_commercial_card_id);
   const customerCode = normalizeText(row.customer_code || row.customer_id);
-  const customerName = customerCode;
+  const customerName = includeCustomerPrivateDetails
+    ? normalizeText(row.customer_display_name || row.customer_name) || customerCode
+    : customerCode;
   return {
     code: normalizeText(row.shipment_code || row.shipment_id),
     customerCode,
@@ -229,7 +231,9 @@ function composeGoodsInfo(row) {
 export function composeDailyStatusRow(row, { includeCustomerPrivateDetails = true } = {}) {
   const customerId = row.customer_id || null;
   const customerCode = normalizeText(row.customer_code || row.customer_id);
-  const customerName = customerCode;
+  const customerName = includeCustomerPrivateDetails
+    ? normalizeText(row.customer_display_name || row.customer_name) || customerCode
+    : customerCode;
   const commercialCard = summarizeCommercialCard(row);
   const workflow = summarizeWorkflow(row);
   const kootajUpdatedAt = row.kootaj_updated_at || null;

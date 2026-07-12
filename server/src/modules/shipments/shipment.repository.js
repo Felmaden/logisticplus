@@ -36,7 +36,9 @@ export function toUiShipment(row, { includeCustomerPrivateDetails = true } = {})
   }, 0);
   const freeTimeDays = Number(legacy.freeTimeDays || row.free_time_days || 0);
   const customerCode = row.customer_code || legacy.customerCode || legacy.customer_code || row.customer_id || legacy.customerId || "";
-  const customerName = customerCode;
+  const customerName = includeCustomerPrivateDetails
+    ? textValue(row.customer_display_name || row.customer_name || legacy.customerName) || customerCode
+    : customerCode;
   return {
     id: row.id,
     trackingNumber: row.shipment_code || legacy.trackingNumber || row.id,
@@ -210,12 +212,12 @@ export async function getShipmentOperationalRecord(
   return toUiShipment(row, { includeCustomerPrivateDetails });
 }
 
-export function toExitedShipment(row) {
+export function toExitedShipment(row, { includeCustomerPrivateDetails = true } = {}) {
   if (!row) return null;
-  const customerCode = row.customer_code || row.customer_id || "";
+  const shipment = toUiShipment(row, { includeCustomerPrivateDetails });
   return {
-    ...toUiShipment(row),
-    customerDisplayName: customerCode,
+    ...shipment,
+    customerDisplayName: shipment.customerName,
     cotageNumber: row.cotage_number || "",
     declarationReference: row.declaration_reference || "",
     exitDate: row.exit_date || "",
@@ -231,6 +233,7 @@ export async function listExitedShipmentRecords(
   {
     organizationId,
     filters = {},
+    includeCustomerPrivateDetails = true,
   } = {}
 ) {
   const scopedOrganizationId = requireOrganizationScope(organizationId, "listExitedShipmentRecords");
@@ -268,7 +271,7 @@ export async function listExitedShipmentRecords(
        s.*,
        s.updated_at AS shipment_updated_at,
        c.customer_code,
-       COALESCE(c.customer_code, s.customer_id) AS customer_display_name,
+       COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName', c.customer_code, s.customer_id) AS customer_display_name,
        k.cotage_number,
        k.declaration_reference,
        k.exit_date,
@@ -290,5 +293,5 @@ export async function listExitedShipmentRecords(
      LIMIT ${limitParam}`,
     values
   );
-  return result.rows.map(toExitedShipment);
+  return result.rows.map((row) => toExitedShipment(row, { includeCustomerPrivateDetails }));
 }

@@ -1000,7 +1000,7 @@ function BaseSection({
           <DialogHeader className="gap-1 border-b border-border/60 pb-3">
             <DialogTitle className="flex items-center gap-2 text-sm font-black">
               <Package className="h-4 w-4 text-primary" />
-              {customerIdentifier || "مشتری"}
+              {customerDisplayLabel || "مشتری"}
             </DialogTitle>
             <DialogDescription className="text-right text-[11px] font-bold text-muted-foreground">
               شناسه مشتری و محموله‌های فعال
@@ -2234,7 +2234,7 @@ export default function ShipmentDetail() {
   const flowCode = profile?.flowCode || profileFlowCode;
   const customer = customers.find((item) => item.id === shipment.customerId) || null;
   const baseSection = profile?.sections.base;
-  const headerCustomerIdentifier = customer?.customerCode || customer?.code || shipment.customerCode || shipment.customerId || shipment.customerName || "";
+  const headerCustomerLabel = customerManagerLabel(customer, shipment, currentUser?.role);
   const updatedAt = profile?.updatedAt || shipment.updatedAt || shipment.createdAt;
   const updatedByName = resolveUserName(profile?.updatedById || profile?.createdById, users, currentUser);
   const routeSteps = [
@@ -2271,7 +2271,7 @@ export default function ShipmentDetail() {
                 </Badge>
               </div>
               <p data-testid="shipment-v2-header-customer" className="mt-1 truncate text-xs font-black text-foreground">
-                {headerCustomerIdentifier || "بدون مشتری"}
+                {headerCustomerLabel || "بدون مشتری"}
               </p>
             </div>
             {canManageCustomerTracking ? (

@@ -1,3 +1,5 @@
+import { canViewCustomerPrivateDetails } from "../customers/customer.repository.js";
+
 export function registerQuotationReadRoutes(
   app,
   {
@@ -17,7 +19,7 @@ export function registerQuotationReadRoutes(
       const data = await listQuotations({
         organizationId,
         includeArchived: req.query.includeArchived === "true",
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       res.json({ ok: true, data });
     } catch (error) {
@@ -35,7 +37,7 @@ export function registerQuotationReadRoutes(
       await requirePermission(user, "quotations.manage");
       const data = await getQuotationRecord(req.params.id, {
         organizationId,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!data) return createApiError(res, 404, "NOT_FOUND", "Quotation was not found.");
       res.json({ ok: true, data });

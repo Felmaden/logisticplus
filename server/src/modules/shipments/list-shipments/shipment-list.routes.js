@@ -1,4 +1,5 @@
 import { listShipments } from "./shipment-list.repository.js";
+import { canViewCustomerPrivateDetails } from "../../customers/customer.repository.js";
 
 export function registerShipmentListRoutes(
   app,
@@ -17,7 +18,7 @@ export function registerShipmentListRoutes(
       await requirePermission(user, "shipments.view_all");
       const data = await listShipments(pool, {
         organizationId,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       res.json({ ok: true, data });
     } catch (error) {

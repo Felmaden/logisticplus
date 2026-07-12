@@ -335,6 +335,7 @@ export function ShipmentV2ReadOnlyProfile({
   const [dialog, setDialog] = React.useState<"customer" | "credential" | null>(null);
   const customer = customers.find((item) => item.id === shipment.customerId) || null;
   const customerIdentifier = customer?.customerCode || customer?.code || shipment.customerCode || shipment.customerId || shipment.customerName || "";
+  const customerDisplay = shipment.customerName || customerIdentifier;
   const activeCustomerShipments = React.useMemo(() => {
     const rows = shipments.filter((item) => item.customerId === shipment.customerId && isActiveShipment(item));
     if (rows.length || !shipment.customerId) return rows;
@@ -343,7 +344,7 @@ export function ShipmentV2ReadOnlyProfile({
       trackingNumber: shipment.trackingNumber,
       containerNumber: "",
       customerId: shipment.customerId,
-      customerName: customerIdentifier,
+      customerName: customerDisplay,
       origin: shipment.origin,
       destination: shipment.destination,
       status: shipment.status,
@@ -351,7 +352,7 @@ export function ShipmentV2ReadOnlyProfile({
       estimatedDelivery: shipment.estimatedDelivery,
       freeTimeDays: 0,
     } as Shipment];
-  }, [shipment, shipments]);
+  }, [customerDisplay, shipment, shipments]);
   const canOpenCredential = Boolean(isLanj ? linkedMalvaniProfile : linkedCommercialCard);
   const showContainerCounts = flowCode === "IMPORT_SHIP";
   const goodsRows = sections.goods.goodsRows || [];
@@ -381,14 +382,14 @@ export function ShipmentV2ReadOnlyProfile({
               <span className="block break-all text-left font-mono" dir="ltr">{shipment.trackingNumber}</span>
             </ReadField>
             <ReadField label="مشتری" testId="document-management-base-customer">
-              {customerIdentifier ? (
+              {customerDisplay ? (
                 <button
                   type="button"
                   data-testid="document-management-customer-button"
                   className="inline-flex max-w-full items-center gap-1 text-right text-primary underline-offset-4 hover:underline"
                   onClick={() => setDialog("customer")}
                 >
-                  <span className="truncate">{customerIdentifier}</span>
+                  <span className="truncate">{customerDisplay}</span>
                   <ExternalLink className="h-3 w-3 shrink-0" />
                 </button>
               ) : EMPTY_TEXT}
@@ -536,7 +537,7 @@ export function ShipmentV2ReadOnlyProfile({
           <DialogHeader className="gap-1 border-b border-border/60 pb-3">
             <DialogTitle className="flex items-center gap-2 text-sm font-black">
               <Package className="h-4 w-4 text-primary" />
-              {displayValue(customerIdentifier)}
+              {displayValue(customerDisplay)}
             </DialogTitle>
             <DialogDescription className="text-right text-[11px] font-bold text-muted-foreground">
               شناسه مشتری و محموله‌های فعال

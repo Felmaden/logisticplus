@@ -235,7 +235,9 @@ async function searchShipments({ user, normalizedQuery, fetchLimit }) {
   const customerSearchExpression = includePrivateCustomerDetails
     ? "CONCAT_WS(' ', s.customer_name, c.company_name, c.contact_name, c.customer_code)"
     : "COALESCE(c.customer_code, s.customer_id, '')";
-  const customerDisplayExpression = "COALESCE(c.customer_code, s.customer_id)";
+  const customerDisplayExpression = includePrivateCustomerDetails
+    ? "COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName', c.customer_code, s.customer_id)"
+    : "COALESCE(c.customer_code, s.customer_id)";
   const fields = {
     shipmentNumber: normalizedSearchSql("s.shipment_code"),
     trackingNumber: normalizedSearchSql("s.legacy_data->>'trackingNumber'"),
@@ -1658,11 +1660,12 @@ function normalizePostExitStatus(value, fallback = "needs_follow_up") {
 export async function listExitedShipmentRecords({
   organizationId,
   filters = {},
+  includeCustomerPrivateDetails = true,
 } = {}) {
-  return listExitedShipmentRecordsFromRepository(pool, { organizationId, filters });
+  return listExitedShipmentRecordsFromRepository(pool, { organizationId, filters, includeCustomerPrivateDetails });
 }
 
-export async function moveShipmentToExitedArchive(id, { organizationId, actorUserId, reason } = {}) {
+export async function moveShipmentToExitedArchive(id, { organizationId, actorUserId, reason, includeCustomerPrivateDetails = true } = {}) {
   const scopedOrganizationId = requireOrganizationScope(organizationId, "moveShipmentToExitedArchive");
   const client = await pool.connect();
   try {
@@ -1695,8 +1698,8 @@ export async function moveShipmentToExitedArchive(id, { organizationId, actorUse
     );
     await client.query("COMMIT");
     const payload = {
-      before: toUiShipment(before),
-      after: toUiShipment(result.rows[0]),
+      before: toUiShipment(before, { includeCustomerPrivateDetails }),
+      after: toUiShipment(result.rows[0], { includeCustomerPrivateDetails }),
     };
     return payload;
   } catch (error) {
@@ -1707,7 +1710,7 @@ export async function moveShipmentToExitedArchive(id, { organizationId, actorUse
   }
 }
 
-export async function restoreShipmentFromExitedArchive(id, { organizationId, actorUserId } = {}) {
+export async function restoreShipmentFromExitedArchive(id, { organizationId, actorUserId, includeCustomerPrivateDetails = true } = {}) {
   const scopedOrganizationId = requireOrganizationScope(organizationId, "restoreShipmentFromExitedArchive");
   const client = await pool.connect();
   try {
@@ -1737,8 +1740,8 @@ export async function restoreShipmentFromExitedArchive(id, { organizationId, act
     );
     await client.query("COMMIT");
     const payload = {
-      before: toUiShipment(before),
-      after: toUiShipment(result.rows[0]),
+      before: toUiShipment(before, { includeCustomerPrivateDetails }),
+      after: toUiShipment(result.rows[0], { includeCustomerPrivateDetails }),
       actorUserId,
     };
     return payload;
@@ -1750,7 +1753,7 @@ export async function restoreShipmentFromExitedArchive(id, { organizationId, act
   }
 }
 
-export async function updateShipmentPostExitFields(id, updates = {}, { organizationId, actorUserId } = {}) {
+export async function updateShipmentPostExitFields(id, updates = {}, { organizationId, actorUserId, includeCustomerPrivateDetails = true } = {}) {
   const scopedOrganizationId = requireOrganizationScope(organizationId, "updateShipmentPostExitFields");
   const client = await pool.connect();
   try {
@@ -1816,8 +1819,8 @@ export async function updateShipmentPostExitFields(id, updates = {}, { organizat
     );
     await client.query("COMMIT");
     return {
-      before: toUiShipment(before),
-      after: toUiShipment(result.rows[0]),
+      before: toUiShipment(before, { includeCustomerPrivateDetails }),
+      after: toUiShipment(result.rows[0], { includeCustomerPrivateDetails }),
     };
   } catch (error) {
     await client.query("ROLLBACK");
@@ -3977,7 +3980,8 @@ export async function getDashboardData(user, permissions = []) {
       [orgParam]
     ),
     pool.query(
-      `SELECT s.id, s.shipment_code, s.customer_id, c.customer_code, s.customer_name, s.status, s.destination, s.estimated_delivery_at, s.legacy_data
+      `SELECT s.id, s.shipment_code, s.customer_id, c.customer_code, s.customer_name, s.status, s.destination, s.estimated_delivery_at, s.legacy_data,
+              COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name
        FROM shipments s
        LEFT JOIN customers c
          ON c.id = s.customer_id
@@ -3990,7 +3994,8 @@ export async function getDashboardData(user, permissions = []) {
       [orgParam]
     ),
     pool.query(
-      `SELECT s.id, s.shipment_code, s.customer_id, c.customer_code, s.customer_name, s.status, s.destination, s.estimated_delivery_at, s.legacy_data
+      `SELECT s.id, s.shipment_code, s.customer_id, c.customer_code, s.customer_name, s.status, s.destination, s.estimated_delivery_at, s.legacy_data,
+              COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name
        FROM shipments s
        LEFT JOIN customers c
          ON c.id = s.customer_id
@@ -4080,7 +4085,9 @@ export async function getDashboardData(user, permissions = []) {
     trackingNumber: row.shipment_code,
     customerId: row.customer_id || "",
     customerCode: row.customer_code || row.customer_id || "",
-    customerName: row.customer_code || row.customer_id || "",
+    customerName: canViewCustomerPrivateDetails(user)
+      ? row.customer_display_name || row.customer_name || row.customer_code || row.customer_id || ""
+      : row.customer_code || row.customer_id || "",
     status: row.status,
     destination: row.destination,
     estimatedDelivery: row.estimated_delivery_at,

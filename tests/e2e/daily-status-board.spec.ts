@@ -164,11 +164,11 @@ test.describe.serial("daily status board", () => {
         customerCode: expect.any(String),
         name: expect.any(String),
       }));
-      expect(seedRow.customer.name).toBe(seedRow.customer.customerCode);
+      expect(seedRow.customer.name).toBe(seedRow.baseInfo.customerName);
       expect(seedRow.baseInfo).toEqual(expect.objectContaining({
         code: seedRow.shipment.code,
         customerCode: seedRow.customer.customerCode,
-        customerName: seedRow.customer.customerCode,
+        customerName: seedRow.customer.name,
         statusText: expect.any(String),
         orderRegistrationNumber: expect.any(String),
         origin: expect.any(String),
@@ -445,8 +445,8 @@ test.describe.serial("daily status board", () => {
       );
       const uiRows = await readOk<any[]>(await owner.get("/api/daily-status"));
       const uiSeedRow = uiRows.find((row) => row.shipment.id === "s1");
-      const expectedCustomerCode = uiSeedRow?.baseInfo?.customerCode || uiSeedRow?.customer?.customerCode || uiSeedRow?.customer?.id;
-      expect(expectedCustomerCode).toBeTruthy();
+      const expectedCustomerDisplay = uiSeedRow?.baseInfo?.customerName || uiSeedRow?.customer?.name || uiSeedRow?.baseInfo?.customerCode || uiSeedRow?.customer?.customerCode || uiSeedRow?.customer?.id;
+      expect(expectedCustomerDisplay).toBeTruthy();
 
       await loginPageByApi(page);
       await page.setViewportSize({ width: 1280, height: 800 });
@@ -479,7 +479,7 @@ test.describe.serial("daily status board", () => {
       await expect(page.getByTestId("daily-status-desktop-view-panel-s1")).toContainText("Owner daily status UI card");
       await expect(page.getByTestId("daily-status-desktop-view-panel-s1")).toContainText(originalCotageNumber);
       await expect(page.getByTestId("daily-status-desktop-base-info-s1")).toBeVisible();
-      await expect(page.getByTestId("daily-status-desktop-base-customer-s1")).toContainText(expectedCustomerCode);
+      await expect(page.getByTestId("daily-status-desktop-base-customer-s1")).toContainText(expectedCustomerDisplay);
       await expect(page.getByTestId("daily-status-desktop-base-business-credential-s1")).toContainText("Owner daily status UI card");
       await expect(page.getByTestId("daily-status-desktop-base-document-count-s1")).toBeVisible();
       await expect(page.getByTestId("daily-status-desktop-base-origin-s1")).toBeVisible();

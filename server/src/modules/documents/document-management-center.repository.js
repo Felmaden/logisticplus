@@ -16,12 +16,15 @@ function normalizeLimit(limit) {
 function toSearchResult(row, { includeCustomerPrivateDetails = true } = {}) {
   if (!row) return null;
   const customerCode = row.customer_code || row.customer_id || "";
+  const customerName = includeCustomerPrivateDetails
+    ? String(row.customer_company_name || row.customer_contact_name || row.customer_name || customerCode || "").trim()
+    : customerCode;
   return {
     id: row.id,
     trackingNumber: row.shipment_code || row.id,
     customerId: row.customer_id || "",
     customerCode,
-    customerName: customerCode,
+    customerName,
     status: normalizeShipmentStatus(row.status),
     shipmentDirection: row.shipment_direction || "import",
     transportMode: row.transport_mode || "",

@@ -83,7 +83,7 @@ const normalizeShipmentRecord = (record: any): Shipment => {
     containerNumber: record.containerNumber || legacy.containerNumber || "",
     customerId: record.customerId || record.customer_id || legacy.customerId || "",
     customerCode,
-    customerName: customerCode || record.customerName || record.customer_name || legacy.customerName || "",
+    customerName: record.customerName || record.customer_name || legacy.customerName || customerCode || "",
     origin: record.origin || legacy.origin || "",
     destination: record.destination || legacy.destination || "",
     status: normalizeShipmentStatus(record.status || legacy.status),

@@ -459,8 +459,8 @@ function credentialInfo(row: DailyStatusBoardRow) {
   };
 }
 
-function rowCustomerCode(row: DailyStatusBoardRow) {
-  return row.baseInfo?.customerCode || row.customer?.customerCode || row.customer?.id || row.baseInfo?.customerName || row.customer?.name || "";
+function rowCustomerDisplay(row: DailyStatusBoardRow) {
+  return row.baseInfo?.customerName || row.customer?.name || row.baseInfo?.customerCode || row.customer?.customerCode || row.customer?.id || "";
 }
 
 function readonlyValue(row: DailyStatusBoardRow, key: string) {
@@ -468,7 +468,7 @@ function readonlyValue(row: DailyStatusBoardRow, key: string) {
     case "shipmentCode":
       return row.baseInfo?.code || row.shipment.code;
     case "customerName":
-      return rowCustomerCode(row);
+      return rowCustomerDisplay(row);
     case "shipmentStatus":
       return baseStatusText(row);
     case "workflowStep":
@@ -513,7 +513,7 @@ function rowSearchText(row: DailyStatusBoardRow) {
   return [
     row.baseInfo?.code,
     row.shipment.code,
-    rowCustomerCode(row),
+    rowCustomerDisplay(row),
     row.customer?.customerCode,
     row.customer?.name,
     row.kootaj.cotageNumber,
@@ -801,9 +801,9 @@ function DailyBaseInfoGrid({
     )) || null
   ), [credential.displayName, credential.id, malvaniProfiles]);
   const canOpenCredential = Boolean(credential.displayName || linkedCommercialCard || linkedMalvaniProfile);
-  const customerName = customer?.name || base?.customerName || row.customer?.name;
+  const customerName = base?.customerName || row.customer?.name || customer?.company || customer?.name;
   const customerIdentifier = customer?.customerCode || customer?.code || row.customer?.customerCode || base?.customerCode || row.customer?.id || customerName || "";
-  const customerDisplay = customerIdentifier;
+  const customerDisplay = customerName || customerIdentifier;
   const canEditCustomer = currentUser?.role === "CEO" && Boolean(row.customer?.id);
   const renderTextEditor = (
     field: Exclude<DailyBaseInfoDraftKey, "status">,
@@ -969,7 +969,7 @@ function DailyBaseInfoGrid({
           <DialogHeader className="gap-1 border-b border-border/60 pb-3">
             <DialogTitle className="flex items-center gap-2 text-sm font-black">
               <Package className="h-4 w-4 text-primary" />
-              {displayValue(customerIdentifier)}
+              {displayValue(customerDisplay)}
             </DialogTitle>
             <DialogDescription className="text-right text-[11px] font-bold text-muted-foreground">
               شناسه مشتری و محموله‌های فعال
@@ -1629,7 +1629,7 @@ function CompactRow({
 }) {
   const credential = credentialInfo(row);
   const shipmentCode = row.baseInfo?.code || row.shipment.code;
-  const customerDisplay = rowCustomerCode(row);
+  const customerDisplay = rowCustomerDisplay(row);
   const statusText = baseStatusText(row);
   return (
     <div className={cn("rounded-lg border border-border bg-card p-3 transition", isActive && "border-primary/40 bg-primary/5")} data-testid={`daily-status-row-${row.id}`}>
@@ -1719,7 +1719,7 @@ function MobileCard({
 }) {
   const credential = credentialInfo(row);
   const shipmentCode = row.baseInfo?.code || row.shipment.code;
-  const customerDisplay = rowCustomerCode(row);
+  const customerDisplay = rowCustomerDisplay(row);
   const statusText = baseStatusText(row);
   return (
     <div className="rounded-lg border border-border bg-card p-3" data-testid={`daily-status-mobile-card-${row.id}`}>

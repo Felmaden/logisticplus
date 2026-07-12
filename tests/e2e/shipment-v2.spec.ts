@@ -78,6 +78,7 @@ test.describe.serial("shipment module v2", () => {
       })
     );
     const customerIdentifier = customer.customerCode || customer.code || customer.id;
+    const customerDisplayName = `${marker} Company`;
     const malvaniName = `${marker} Malvani`;
     const malvaniProfile = await readOk<any>(
       await page.request.post("/api/malvani-profiles", {
@@ -325,7 +326,7 @@ test.describe.serial("shipment module v2", () => {
     const shipmentsListPayload = await readOk<any[]>(await page.request.get("/api/shipments"));
     const listShipment = shipmentsListPayload.find((item) => item.id === shipmentId);
     expect(listShipment).toBeTruthy();
-    expect(listShipment.customerName).toBe(customerIdentifier);
+    expect(listShipment.customerName).toBe(customerDisplayName);
     expect(listShipment.customerCode).toBe(customerIdentifier);
     expect(listShipment.origin).toBe("Dubai");
     expect(listShipment.destination).toBe("Tehran");
@@ -342,14 +343,13 @@ test.describe.serial("shipment module v2", () => {
     await page.locator("input").first().fill(goodsTotalText);
     await expect(shipmentRow).toBeVisible();
     await page.locator("input").first().fill("");
-    await expect(shipmentRow).toContainText(customerIdentifier);
+    await expect(shipmentRow).toContainText(customerDisplayName);
     await expect(shipmentRow).toContainText("Dubai");
     await expect(shipmentRow).toContainText("Tehran");
     await expect(page.getByTestId(`shipment-row-goods-count-${shipmentId}`)).toContainText(persianNumber(15));
     await expect(page.getByTestId(`shipment-row-first-goods-${shipmentId}`)).toContainText("کالای تست V2");
     await expect(shipmentRow).toContainText("کوتاژ شده");
     await expect(shipmentRow).toContainText(detailCurrentStage);
-    await expect(shipmentRow).not.toContainText(`${marker} Company`);
     await expect(shipmentRow).not.toContainText("100%");
     await expect(page.getByTestId("open-shipment-dialog")).toHaveCount(0);
     await page.getByTestId("open-shipment-v2-create").click();

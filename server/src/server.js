@@ -911,6 +911,7 @@ function toDashboardHomeDto(user, dashboardData = {}) {
     id: shipment.id,
     shipmentCode: shipment.trackingNumber || shipment.shipmentCode || shipment.id,
     customerCode: shipment.customerCode || shipment.customerId || "",
+    customerName: shipment.customerName || shipment.customerCode || shipment.customerId || "",
     status: shipment.status || "PENDING",
     destination: shipment.destination || "",
     estimatedDelivery: shipment.estimatedDelivery || "",

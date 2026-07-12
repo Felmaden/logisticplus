@@ -1,6 +1,7 @@
 import { parseRequestValue } from "../../../shared/middleware/validate.middleware.js";
 import { shipmentParamsSchema } from "../shipment.validation.js";
 import { getShipmentOperationalRecord } from "../shipment.repository.js";
+import { canViewCustomerPrivateDetails } from "../../customers/customer.repository.js";
 
 export function registerShipmentGetRoutes(
   app,
@@ -21,7 +22,7 @@ export function registerShipmentGetRoutes(
       if (!params) return;
       const data = await getShipmentOperationalRecord(pool, params.id, {
         organizationId,
-        includeCustomerPrivateDetails: user.role === "CEO",
+        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!data) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       res.json({ ok: true, data });

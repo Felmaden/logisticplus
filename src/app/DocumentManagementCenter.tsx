@@ -67,7 +67,7 @@ function SearchResultButton({
   active: boolean;
   onSelect: () => void;
 }) {
-  const customerIdentifier = result.customerCode || result.customerId || result.customerName;
+  const customerIdentifier = result.customerName || result.customerCode || result.customerId;
   return (
     <button
       type="button"
