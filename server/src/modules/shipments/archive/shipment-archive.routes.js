@@ -6,7 +6,6 @@ import {
   shipmentParamsSchema,
 } from "../shipment.validation.js";
 import { listExitedShipmentRecords } from "../shipment.repository.js";
-import { canViewCustomerPrivateDetails } from "../../customers/customer.repository.js";
 
 export function registerShipmentArchiveRoutes(
   app,
@@ -33,7 +32,6 @@ export function registerShipmentArchiveRoutes(
       const data = await listExitedShipmentRecords(pool, {
         organizationId,
         filters: query,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       res.json({ ok: true, data });
     } catch (error) {
@@ -57,7 +55,6 @@ export function registerShipmentArchiveRoutes(
         organizationId,
         actorUserId: user.id,
         reason: body.reason,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       await auditLog({
@@ -95,7 +92,6 @@ export function registerShipmentArchiveRoutes(
       const result = await restoreShipmentFromExitedArchive(params.id, {
         organizationId,
         actorUserId: user.id,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       await auditLog({
@@ -134,7 +130,6 @@ export function registerShipmentArchiveRoutes(
       const result = await updateShipmentPostExitFields(params.id, body, {
         organizationId,
         actorUserId: user.id,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       await auditLog({

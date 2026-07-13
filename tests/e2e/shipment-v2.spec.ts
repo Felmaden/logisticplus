@@ -78,7 +78,7 @@ test.describe.serial("shipment module v2", () => {
       })
     );
     const customerIdentifier = customer.customerCode || customer.code || customer.id;
-    const customerDisplayName = `${marker} Company`;
+    const customerDisplayName = `${marker} Customer`;
     const malvaniName = `${marker} Malvani`;
     const malvaniProfile = await readOk<any>(
       await page.request.post("/api/malvani-profiles", {

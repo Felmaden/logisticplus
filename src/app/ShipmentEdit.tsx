@@ -36,7 +36,7 @@ const formFromShipment = (shipment: Shipment, consigneeName = ""): ShipmentEditF
 });
 
 const customerLabel = (customer: Customer) => {
-  const name = customer.company || customer.name || customer.customerCode || customer.code || customer.id;
+  const name = customer.name || customer.company || customer.customerCode || customer.code || customer.id;
   const code = customer.customerCode || customer.code;
   return code && code !== name ? `${name} — ${code}` : name;
 };

@@ -1,7 +1,6 @@
 import { documentManagementCenterSearchQuerySchema } from "./document.validation.js";
 import { searchDocumentManagementShipments } from "./document-management-center.repository.js";
 import { parseRequestValue } from "../../shared/middleware/validate.middleware.js";
-import { canViewCustomerPrivateDetails } from "../customers/customer.repository.js";
 
 function isDocumentManagementSchemaMissing(error) {
   return (
@@ -34,7 +33,6 @@ export function registerDocumentManagementCenterRoutes(
         organizationId,
         query: query.query,
         limit: query.limit,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       res.json({ ok: true, data });
     } catch (error) {

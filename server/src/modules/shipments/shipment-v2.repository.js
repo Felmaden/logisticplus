@@ -285,7 +285,7 @@ async function getShipmentRow(queryable, { organizationId, shipmentId, lock = fa
     `SELECT
        s.*,
        c.customer_code,
-       COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name
+       COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name
      FROM shipments s
      LEFT JOIN customers c
        ON c.id = s.customer_id
@@ -383,7 +383,7 @@ export async function createShipmentV2Record(pool, {
       }
       const shipmentCode = codeParts.shipmentCode;
       const shipmentTypeCode = FLOW_TO_SHIPMENT_TYPE[body.flowCode] || "IMPORT_SEA_CONTAINER";
-      const customerName = customer.company_name || customer.contact_name || "";
+      const customerName = customer.contact_name || customer.company_name || "";
       const legacyData = {
         trackingNumber: shipmentCode,
         customerId: body.customerId,

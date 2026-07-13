@@ -17,7 +17,7 @@ function toSearchResult(row, { includeCustomerPrivateDetails = true } = {}) {
   if (!row) return null;
   const customerCode = row.customer_code || row.customer_id || "";
   const customerName = includeCustomerPrivateDetails
-    ? String(row.customer_company_name || row.customer_contact_name || row.customer_name || customerCode || "").trim()
+    ? String(row.customer_contact_name || row.customer_company_name || row.customer_name || customerCode || "").trim()
     : customerCode;
   return {
     id: row.id,

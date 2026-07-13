@@ -82,18 +82,18 @@ test.describe("document management center", () => {
     await page.getByTestId("document-management-search").fill(trackingNumber);
     const searchResult = page.getByTestId(`document-management-result-${created.shipment.id}`);
     await expect(searchResult).toBeVisible();
-    await expect(searchResult).toContainText(`${marker} Company`);
+    await expect(searchResult).toContainText(`${marker} Customer`);
     await searchResult.click();
 
     await expect(page.getByTestId("document-management-shipment-profile")).toBeVisible();
     await expect(page.getByTestId("document-management-base-code")).toContainText(trackingNumber);
-    await expect(page.getByTestId("document-management-base-customer")).toContainText(`${marker} Company`);
+    await expect(page.getByTestId("document-management-base-customer")).toContainText(`${marker} Customer`);
     await expect(page.getByTestId("document-management-profile-goods")).toBeVisible();
     await expect(page.getByTestId("document-management-chat-section")).toBeVisible();
     await expect(page.getByTestId("document-management-documents-section")).toContainText(`${marker} Bill of Lading`);
 
     await page.getByTestId("document-management-customer-button").click();
-    await expect(page.getByTestId("document-management-customer-dialog")).toContainText(`${marker} Company`);
+    await expect(page.getByTestId("document-management-customer-dialog")).toContainText(`${marker} Customer`);
     await expect(page.getByTestId("document-management-customer-dialog")).toContainText(customer.customerCode);
     await page.keyboard.press("Escape");
 

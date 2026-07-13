@@ -181,11 +181,9 @@ function customerCodeLabel(customer: Customer | null, shipment: ShipmentV2Shipme
   return customer?.customerCode || customer?.code || shipment.customerCode || shipment.customerId || shipment.customerName || "";
 }
 
-function customerManagerLabel(customer: Customer | null, shipment: ShipmentV2ShipmentSummary, role?: UserRole) {
+function shipmentCustomerLabel(customer: Customer | null, shipment: ShipmentV2ShipmentSummary) {
   const code = customerCodeLabel(customer, shipment);
-  if (role !== "CEO" && role !== "MANAGER") return code;
-
-  const name = customer?.company || customer?.name || shipment.customerName || "";
+  const name = shipment.customerName || customer?.name || customer?.company || "";
   if (!name || name === code) return code;
   if (!code) return name;
   return `${name} — ${code}`;
@@ -532,7 +530,6 @@ function BaseSection({
   updatedAt,
   updatedByName,
   canUpdate,
-  currentUserRole,
   isSaving,
   onSave,
 }: {
@@ -550,7 +547,6 @@ function BaseSection({
   updatedAt?: string | null;
   updatedByName: string;
   canUpdate: boolean;
-  currentUserRole?: UserRole;
   isSaving: boolean;
   onSave: (payload: ShipmentV2BaseSection) => void;
 }) {
@@ -576,7 +572,7 @@ function BaseSection({
       : documentCount.toLocaleString("fa-IR");
   const displayStatus = shipmentStatusLabel(shipment.status);
   const customerIdentifier = customerCodeLabel(customer, shipment);
-  const customerDisplayLabel = customerManagerLabel(customer, shipment, currentUserRole);
+  const customerDisplayLabel = shipmentCustomerLabel(customer, shipment);
   const totalQuantity = sumGoodsMetric(goodsData.goodsRows || [], "quantity");
   const totalContainerCount = sumContainerCount(goodsData);
 
@@ -618,7 +614,7 @@ function BaseSection({
         trackingNumber: shipment.trackingNumber,
         containerNumber: "",
         customerId: shipment.customerId,
-        customerName: customerIdentifier,
+        customerName: shipment.customerName || customerDisplayLabel || customerIdentifier,
         origin: shipment.origin,
         destination: shipment.destination,
         status: shipment.status,
@@ -2234,7 +2230,7 @@ export default function ShipmentDetail() {
   const flowCode = profile?.flowCode || profileFlowCode;
   const customer = customers.find((item) => item.id === shipment.customerId) || null;
   const baseSection = profile?.sections.base;
-  const headerCustomerLabel = customerManagerLabel(customer, shipment, currentUser?.role);
+  const headerCustomerLabel = shipmentCustomerLabel(customer, shipment);
   const updatedAt = profile?.updatedAt || shipment.updatedAt || shipment.createdAt;
   const updatedByName = resolveUserName(profile?.updatedById || profile?.createdById, users, currentUser);
   const routeSteps = [
@@ -2344,7 +2340,6 @@ export default function ShipmentDetail() {
                       updatedAt={updatedAt}
                       updatedByName={updatedByName}
                       canUpdate={canUpdate}
-                      currentUserRole={currentUser?.role}
                       isSaving={savingSection === "base"}
                       onSave={(payload) => void saveSection("base", payload)}
                     />

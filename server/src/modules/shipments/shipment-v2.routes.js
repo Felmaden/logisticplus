@@ -12,7 +12,6 @@ import {
   shipmentV2AuditSnapshot,
   updateShipmentV2Section,
 } from "./shipment-v2.repository.js";
-import { canViewCustomerPrivateDetails } from "../customers/customer.repository.js";
 
 function isShipmentV2SchemaMissing(error) {
   return (
@@ -70,7 +69,6 @@ export function registerShipmentV2Routes(
         actorUserId: user.id,
         body,
         canUseExistingCode: canManageShipmentCodes(user, permissions),
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
 
       await auditLog({
@@ -106,7 +104,6 @@ export function registerShipmentV2Routes(
       const data = await getShipmentV2Profile(pool, {
         organizationId,
         shipmentId: params.id,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!data) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       res.json({ ok: true, data });
@@ -128,7 +125,6 @@ export function registerShipmentV2Routes(
         organizationId,
         shipmentId: params.id,
         actorUserId: user.id,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!data) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
 
@@ -172,7 +168,6 @@ export function registerShipmentV2Routes(
         actorUserId: user.id,
         payload,
         canEditShipmentCode: canManageShipmentCodes(user, permissions),
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
 

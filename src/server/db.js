@@ -231,13 +231,8 @@ async function searchShipments({ user, normalizedQuery, fetchLimit }) {
   const values = [];
   const organizationParam = `$${values.push(user.organizationId)}`;
   const ownerParam = `$${values.push(user.id)}`;
-  const includePrivateCustomerDetails = canViewCustomerPrivateDetails(user);
-  const customerSearchExpression = includePrivateCustomerDetails
-    ? "CONCAT_WS(' ', s.customer_name, c.company_name, c.contact_name, c.customer_code)"
-    : "COALESCE(c.customer_code, s.customer_id, '')";
-  const customerDisplayExpression = includePrivateCustomerDetails
-    ? "COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName', c.customer_code, s.customer_id)"
-    : "COALESCE(c.customer_code, s.customer_id)";
+  const customerSearchExpression = "CONCAT_WS(' ', s.customer_name, c.contact_name, c.company_name, c.customer_code)";
+  const customerDisplayExpression = "COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), NULLIF(s.legacy_data->>'customerName', ''), c.customer_code, s.customer_id)";
   const fields = {
     shipmentNumber: normalizedSearchSql("s.shipment_code"),
     trackingNumber: normalizedSearchSql("s.legacy_data->>'trackingNumber'"),
@@ -768,9 +763,7 @@ export async function getRecordsForUser(ownerUserId, { organizationId, tenantCon
       includeArchived: true,
       includePrivateDetails: canViewCustomerPrivateDetails(user),
     }),
-    listBootstrapShipmentsFromRepository(pool, ownerUserId, userOrganizationId, {
-      includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
-    }),
+    listBootstrapShipmentsFromRepository(pool, ownerUserId, userOrganizationId),
     listTasks({ organizationId: userOrganizationId, includeAll: true }),
     listDocuments({ organizationId: userOrganizationId, includeArchived: true }),
     listComplianceMeetings({ organizationId: userOrganizationId, includeArchived: true }),
@@ -1457,7 +1450,7 @@ export async function createShipmentRecord({ ownerUserId, actorUserId, organizat
         ownerUserId,
         codeParts.shipmentCode,
         shipment.customerId || null,
-        shipment.customerName || customer?.company_name || customer?.contact_name || null,
+        customer?.contact_name || customer?.company_name || shipment.customerName || null,
         normalizeShipmentStatus(shipment.status),
         codeParts.shamsiYear,
         codeParts.shamsiDate,
@@ -1473,7 +1466,7 @@ export async function createShipmentRecord({ ownerUserId, actorUserId, organizat
           ...legacyPatch,
           trackingNumber: codeParts.shipmentCode,
           customerId: shipment.customerId || undefined,
-          customerName: shipment.customerName || customer?.company_name || customer?.contact_name || undefined,
+          customerName: customer?.contact_name || customer?.company_name || shipment.customerName || undefined,
           shipmentTypeCode: typeColumns.shipmentTypeCode,
           shipmentDirection: typeColumns.shipmentDirection,
           transportMode: typeColumns.transportMode,
@@ -1492,7 +1485,7 @@ export async function createShipmentRecord({ ownerUserId, actorUserId, organizat
       {
         ...result.rows[0],
         customer_code: customer?.customer_code || null,
-        customer_display_name: customer?.company_name || customer?.contact_name || result.rows[0].customer_name || "",
+        customer_display_name: customer?.contact_name || customer?.company_name || result.rows[0].customer_name || "",
       },
       { includeCustomerPrivateDetails }
     );
@@ -1519,7 +1512,7 @@ export async function updateShipmentOperationalFields(id, updates = {}, { organi
       `SELECT
          s.*,
          c.customer_code,
-         COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name
+         COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name
        FROM shipments s
        LEFT JOIN customers c
          ON c.id = s.customer_id
@@ -1602,7 +1595,7 @@ export async function updateShipmentOperationalFields(id, updates = {}, { organi
     }
     if (updates.customerId !== undefined) addColumn("customer_id", updates.customerId || null);
     if (updates.customerName !== undefined || customer) {
-      addColumn("customer_name", updates.customerName || customer?.company_name || customer?.contact_name || null);
+      addColumn("customer_name", customer?.contact_name || customer?.company_name || updates.customerName || null);
     }
     if (hasStatusUpdate) addColumn("status", nextStatus);
     if (hasShipmentTypeUpdate) {
@@ -1631,7 +1624,7 @@ export async function updateShipmentOperationalFields(id, updates = {}, { organi
         {
           ...result.rows[0],
           customer_code: customer?.customer_code || before.customer_code || null,
-          customer_display_name: customer?.company_name || customer?.contact_name || result.rows[0].customer_name || "",
+          customer_display_name: customer?.contact_name || customer?.company_name || result.rows[0].customer_name || "",
         },
         { includeCustomerPrivateDetails }
       ),
@@ -3981,7 +3974,7 @@ export async function getDashboardData(user, permissions = []) {
     ),
     pool.query(
       `SELECT s.id, s.shipment_code, s.customer_id, c.customer_code, s.customer_name, s.status, s.destination, s.estimated_delivery_at, s.legacy_data,
-              COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name
+              COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name
        FROM shipments s
        LEFT JOIN customers c
          ON c.id = s.customer_id
@@ -3995,7 +3988,7 @@ export async function getDashboardData(user, permissions = []) {
     ),
     pool.query(
       `SELECT s.id, s.shipment_code, s.customer_id, c.customer_code, s.customer_name, s.status, s.destination, s.estimated_delivery_at, s.legacy_data,
-              COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name
+              COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name
        FROM shipments s
        LEFT JOIN customers c
          ON c.id = s.customer_id
@@ -4085,9 +4078,7 @@ export async function getDashboardData(user, permissions = []) {
     trackingNumber: row.shipment_code,
     customerId: row.customer_id || "",
     customerCode: row.customer_code || row.customer_id || "",
-    customerName: canViewCustomerPrivateDetails(user)
-      ? row.customer_display_name || row.customer_name || row.customer_code || row.customer_id || ""
-      : row.customer_code || row.customer_id || "",
+    customerName: row.customer_display_name || row.customer_name || row.customer_code || row.customer_id || "",
     status: row.status,
     destination: row.destination,
     estimatedDelivery: row.estimated_delivery_at,

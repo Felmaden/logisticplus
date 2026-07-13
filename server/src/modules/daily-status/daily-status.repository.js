@@ -520,7 +520,7 @@ function dailyStatusQuery(filters = {}, organizationId, { includeCustomerPrivate
         s.customer_id,
         s.customer_name,
         c.customer_code AS customer_code,
-        COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name,
+        COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name,
         k.commercial_card_id AS kootaj_commercial_card_id,
         k.order_registration_number,
         k.order_registration_date,

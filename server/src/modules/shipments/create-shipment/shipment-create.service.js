@@ -4,13 +4,11 @@ export async function createShipment({
   actorUserId,
   tenantContext,
   shipment,
-  includeCustomerPrivateDetails,
 }) {
   return createShipmentRecord({
     ownerUserId,
     actorUserId,
     tenantContext,
     shipment,
-    includeCustomerPrivateDetails,
   });
 }

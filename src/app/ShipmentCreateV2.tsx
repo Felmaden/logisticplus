@@ -102,7 +102,7 @@ function customerOptionLabel(customer: Customer) {
 
 function customerDisplayName(customer: Customer) {
   const code = customerOptionLabel(customer);
-  return [customer.company, customer.name]
+  return [customer.name, customer.company]
     .filter((value) => value && value !== code)
     .join(" - ");
 }

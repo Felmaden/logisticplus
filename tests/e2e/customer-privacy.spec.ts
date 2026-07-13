@@ -6,6 +6,7 @@ import {
   disposeContexts,
   expectForbidden,
   loginApi,
+  loginViaUi,
   readOk,
   uniqueEmail,
 } from "./helpers";
@@ -89,7 +90,7 @@ test.describe.serial("customer private detail visibility", () => {
     await cleanupPrivacyRows(marker);
   });
 
-  test("limits private customer fields while showing shipment names to CEO and manager users", async () => {
+  test("limits private customer fields while showing customer names to all employees", async ({ page }) => {
     const owner = await loginApi();
     const contexts = [owner];
     try {
@@ -126,12 +127,13 @@ test.describe.serial("customer private detail visibility", () => {
       const privateReferrer = `${marker} private referrer`;
       const privateNotes = `${marker} private notes`;
       const privateCustomerCode = `${marker}-code`.toUpperCase();
+      const privateCustomerName = `${marker} Customer`;
       const privateCompany = `${marker} Company`;
       const customer = await readOk<any>(
         await owner.post("/api/customers", {
           data: {
             customerCode: privateCustomerCode,
-            name: `${marker} Customer`,
+            name: privateCustomerName,
             company: privateCompany,
             email: privateEmail,
             phone: privatePhone,
@@ -164,64 +166,64 @@ test.describe.serial("customer private detail visibility", () => {
       );
       const shipmentId = createdShipment.shipment.id;
       const trackingNumber = createdShipment.shipment.trackingNumber;
-      expect(createdShipment.shipment.customerName).toBe(privateCompany);
+      expect(createdShipment.shipment.customerName).toBe(privateCustomerName);
 
       const managerShipments = await readOk<any[]>(await manager.get("/api/shipments"));
       expect(managerShipments.find((item) => item.id === shipmentId)).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCompany,
+        customerName: privateCustomerName,
       });
       const managerShipmentDetail = await readOk<any>(await manager.get(`/api/shipments/${shipmentId}`));
       expect(managerShipmentDetail).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCompany,
+        customerName: privateCustomerName,
       });
       const managerV2Profile = await readOk<any>(await manager.get(`/api/shipments/${shipmentId}/v2-profile`));
       expect(managerV2Profile.shipment).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCompany,
+        customerName: privateCustomerName,
       });
       const managerDailyRows = await readOk<any[]>(await manager.get(`/api/daily-status?shipmentId=${shipmentId}`));
       expect(managerDailyRows[0]).toMatchObject({
-        baseInfo: { customerCode: privateCustomerCode, customerName: privateCompany },
-        customer: { customerCode: privateCustomerCode, name: privateCompany },
+        baseInfo: { customerCode: privateCustomerCode, customerName: privateCustomerName },
+        customer: { customerCode: privateCustomerCode, name: privateCustomerName },
       });
       const managerDocumentSearch = await readOk<any[]>(
-        await manager.get(`/api/documents/management-center/search?query=${encodeURIComponent(privateCompany)}`)
+        await manager.get(`/api/documents/management-center/search?query=${encodeURIComponent(privateCustomerName)}`)
       );
       expect(managerDocumentSearch.find((item) => item.id === shipmentId)).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCompany,
+        customerName: privateCustomerName,
       });
       const managerDashboard = await readOk<any>(await manager.get("/api/dashboard"));
       expect(managerDashboard.lastUpdatedShipments.find((item) => item.id === shipmentId)).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCompany,
+        customerName: privateCustomerName,
       });
 
       const employeeShipments = await readOk<any[]>(await employee.get("/api/shipments"));
       const employeeShipment = employeeShipments.find((item) => item.id === shipmentId);
       expect(employeeShipment).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCustomerCode,
+        customerName: privateCustomerName,
       });
       expect(JSON.stringify(employeeShipment)).not.toContain(privateCompany);
       const employeeShipmentDetail = await readOk<any>(await employee.get(`/api/shipments/${shipmentId}`));
       expect(employeeShipmentDetail).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCustomerCode,
+        customerName: privateCustomerName,
       });
       expect(JSON.stringify(employeeShipmentDetail)).not.toContain(privateCompany);
       const employeeV2Profile = await readOk<any>(await employee.get(`/api/shipments/${shipmentId}/v2-profile`));
       expect(employeeV2Profile.shipment).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCustomerCode,
+        customerName: privateCustomerName,
       });
       expect(JSON.stringify(employeeV2Profile.shipment)).not.toContain(privateCompany);
       const employeeDailyRows = await readOk<any[]>(await employee.get(`/api/daily-status?shipmentId=${shipmentId}`));
       expect(employeeDailyRows[0]).toMatchObject({
-        baseInfo: { customerCode: privateCustomerCode, customerName: privateCustomerCode },
-        customer: { customerCode: privateCustomerCode, name: privateCustomerCode },
+        baseInfo: { customerCode: privateCustomerCode, customerName: privateCustomerName },
+        customer: { customerCode: privateCustomerCode, name: privateCustomerName },
       });
       expect(JSON.stringify(employeeDailyRows[0])).not.toContain(privateCompany);
       const employeeDocumentByTracking = await readOk<any[]>(
@@ -229,18 +231,18 @@ test.describe.serial("customer private detail visibility", () => {
       );
       expect(employeeDocumentByTracking.find((item) => item.id === shipmentId)).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCustomerCode,
+        customerName: privateCustomerName,
       });
       expect(JSON.stringify(employeeDocumentByTracking)).not.toContain(privateCompany);
-      const employeeDocumentByCompany = await readOk<any[]>(
-        await employee.get(`/api/documents/management-center/search?query=${encodeURIComponent(privateCompany)}`)
+      const employeeDocumentByName = await readOk<any[]>(
+        await employee.get(`/api/documents/management-center/search?query=${encodeURIComponent(privateCustomerName)}`)
       );
-      expect(employeeDocumentByCompany.some((item) => item.id === shipmentId)).toBe(false);
+      expect(employeeDocumentByName.some((item) => item.id === shipmentId)).toBe(true);
       const employeeDashboard = await readOk<any>(await employee.get("/api/dashboard"));
       const employeeDashboardShipment = employeeDashboard.lastUpdatedShipments.find((item) => item.id === shipmentId);
       expect(employeeDashboardShipment).toMatchObject({
         customerCode: privateCustomerCode,
-        customerName: privateCustomerCode,
+        customerName: privateCustomerName,
       });
       expect(JSON.stringify(employeeDashboardShipment)).not.toContain(privateCompany);
 
@@ -251,7 +253,7 @@ test.describe.serial("customer private detail visibility", () => {
       expect(employeeCustomer).toMatchObject({
         id: customer.id,
         customerCode: privateCustomerCode,
-        name: privateCustomerCode,
+        name: privateCustomerName,
         company: privateCustomerCode,
         phone: "",
         phoneNumbers: [],
@@ -265,7 +267,7 @@ test.describe.serial("customer private detail visibility", () => {
       const employeeDetail = await readOk<any>(await employee.get(`/api/customers/${customer.id}`));
       expect(employeeDetail).toMatchObject({
         customerCode: privateCustomerCode,
-        name: privateCustomerCode,
+        name: privateCustomerName,
         company: privateCustomerCode,
         phone: "",
         phoneNumbers: [],
@@ -280,10 +282,14 @@ test.describe.serial("customer private detail visibility", () => {
         await employee.get(`/api/customers?search=${encodeURIComponent(privatePhone)}`)
       );
       expect(privateFieldCustomerSearch.some((item) => item.id === customer.id)).toBe(false);
-      const privateNameCustomerSearch = await readOk<any[]>(
+      const customerNameSearch = await readOk<any[]>(
+        await employee.get(`/api/customers?search=${encodeURIComponent(privateCustomerName)}`)
+      );
+      expect(customerNameSearch.some((item) => item.id === customer.id)).toBe(true);
+      const privateCompanyCustomerSearch = await readOk<any[]>(
         await employee.get(`/api/customers?search=${encodeURIComponent(privateCompany)}`)
       );
-      expect(privateNameCustomerSearch.some((item) => item.id === customer.id)).toBe(false);
+      expect(privateCompanyCustomerSearch.some((item) => item.id === customer.id)).toBe(false);
 
       const globalSearch = await readSearch(employee, { q: privatePhone, type: "customers" });
       expect(globalSearch.results.some((result) => result.id === customer.id)).toBe(false);
@@ -298,7 +304,7 @@ test.describe.serial("customer private detail visibility", () => {
       const bootstrapCustomer = (bootstrapPayload.records?.customers || []).find((item: any) => item.id === customer.id);
       expect(bootstrapCustomer).toMatchObject({
         customerCode: privateCustomerCode,
-        name: privateCustomerCode,
+        name: privateCustomerName,
         company: privateCustomerCode,
         phone: "",
         phoneNumbers: [],
@@ -308,10 +314,29 @@ test.describe.serial("customer private detail visibility", () => {
         notes: "",
         canViewPrivateDetails: false,
       });
+      const bootstrapShipment = (bootstrapPayload.records?.shipments || []).find((item: any) => item.id === shipmentId);
+      expect(bootstrapShipment).toMatchObject({
+        customerCode: privateCustomerCode,
+        customerName: privateCustomerName,
+      });
       expect(JSON.stringify(bootstrapPayload.records?.customers || [])).not.toContain(privatePhone);
       expect(JSON.stringify(bootstrapPayload.records?.customers || [])).not.toContain(secondaryPhone);
       expect(JSON.stringify(bootstrapPayload.records?.customers || [])).not.toContain(privateAddress);
       expect(JSON.stringify(bootstrapPayload.records?.customers || [])).not.toContain(privateReferrer);
+
+      await loginViaUi(page, employeeEmail, USER_PASSWORD);
+      await page.goto("/dashboard");
+      const dashboardShipmentCard = page.getByTestId("dashboard-last-shipment").filter({ hasText: trackingNumber });
+      await expect(dashboardShipmentCard).toContainText(privateCustomerName);
+      await expect(dashboardShipmentCard).not.toContainText(privateCompany);
+
+      await page.goto("/shipments");
+      await expect(page.getByTestId(`shipment-row-customer-${shipmentId}`)).toHaveText(privateCustomerName);
+
+      await page.goto("/daily-status");
+      const dailyStatusRow = page.getByTestId(`daily-status-row-${shipmentId}`);
+      await expect(dailyStatusRow).toContainText(privateCustomerName);
+      await expect(dailyStatusRow).not.toContainText(privateCompany);
 
       const saveResponse = await employee.put(`/api/users/${employeeUser.id}/records`, {
         data: { records: bootstrapPayload.records || {} },

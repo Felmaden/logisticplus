@@ -60,6 +60,7 @@ export async function listCustomersDetailed(pool, { includeArchived = false, sea
     const searchFields = [
       "lower(c.customer_code)",
       "lower(c.id)",
+      "lower(COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), ''))",
     ];
     if (includePrivateDetails) {
       searchFields.push(

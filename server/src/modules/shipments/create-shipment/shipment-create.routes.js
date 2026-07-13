@@ -1,7 +1,6 @@
 import { parseRequestValue } from "../../../shared/middleware/validate.middleware.js";
 import { shipmentCreateBodySchema } from "../shipment.validation.js";
 import { createShipment } from "./shipment-create.service.js";
-import { canViewCustomerPrivateDetails } from "../../customers/customer.repository.js";
 
 export function registerShipmentCreateRoutes(
   app,
@@ -28,7 +27,6 @@ export function registerShipmentCreateRoutes(
         actorUserId: user.id,
         tenantContext,
         shipment: body,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       await auditLog({
         actorUserId: user.id,

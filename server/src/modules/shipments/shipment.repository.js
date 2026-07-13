@@ -116,7 +116,7 @@ export async function listBootstrapShipments(
     `SELECT
        s.*,
        c.customer_code,
-       COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name,
+       COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name,
        p.id AS v2_profile_id,
        p.flow_code AS v2_flow_code,
        p.sections_json AS v2_sections_json,
@@ -148,7 +148,7 @@ export async function listShipmentRecords(pool, { organizationId, includeExited 
     `SELECT
        s.*,
        c.customer_code,
-       COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name,
+       COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name,
        p.id AS v2_profile_id,
        p.flow_code AS v2_flow_code,
        p.sections_json AS v2_sections_json,
@@ -175,7 +175,7 @@ export async function getShipmentRecord(pool, shipmentId, { organizationId } = {
     `SELECT
        s.*,
        c.customer_code,
-       COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName') AS customer_display_name,
+       COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName') AS customer_display_name,
        p.id AS v2_profile_id,
        p.flow_code AS v2_flow_code,
        p.sections_json AS v2_sections_json,
@@ -271,7 +271,7 @@ export async function listExitedShipmentRecords(
        s.*,
        s.updated_at AS shipment_updated_at,
        c.customer_code,
-       COALESCE(c.company_name, c.contact_name, s.customer_name, s.legacy_data->>'customerName', c.customer_code, s.customer_id) AS customer_display_name,
+       COALESCE(NULLIF(c.contact_name, ''), NULLIF(c.company_name, ''), NULLIF(s.customer_name, ''), s.legacy_data->>'customerName', c.customer_code, s.customer_id) AS customer_display_name,
        k.cotage_number,
        k.declaration_reference,
        k.exit_date,

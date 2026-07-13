@@ -801,7 +801,7 @@ function DailyBaseInfoGrid({
     )) || null
   ), [credential.displayName, credential.id, malvaniProfiles]);
   const canOpenCredential = Boolean(credential.displayName || linkedCommercialCard || linkedMalvaniProfile);
-  const customerName = base?.customerName || row.customer?.name || customer?.company || customer?.name;
+  const customerName = base?.customerName || row.customer?.name || customer?.name || customer?.company;
   const customerIdentifier = customer?.customerCode || customer?.code || row.customer?.customerCode || base?.customerCode || row.customer?.id || customerName || "";
   const customerDisplay = customerName || customerIdentifier;
   const canEditCustomer = currentUser?.role === "CEO" && Boolean(row.customer?.id);

@@ -3,7 +3,6 @@ import {
   shipmentOperationalFieldsBodySchema,
   shipmentParamsSchema,
 } from "../shipment.validation.js";
-import { canViewCustomerPrivateDetails } from "../../customers/customer.repository.js";
 
 export function registerShipmentOperationalRoutes(
   app,
@@ -29,7 +28,6 @@ export function registerShipmentOperationalRoutes(
       const result = await updateShipmentOperationalFields(params.id, body, {
         organizationId,
         actorUserId: user.id,
-        includeCustomerPrivateDetails: canViewCustomerPrivateDetails(user),
       });
       if (!result) return createApiError(res, 404, "NOT_FOUND", "Shipment was not found.");
       await auditLog({

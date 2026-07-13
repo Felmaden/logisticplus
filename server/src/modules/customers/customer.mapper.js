@@ -29,6 +29,7 @@ export function toUiCustomer(row, { includePrivateDetails = true, phoneNumbers =
   if (!row) return null;
   const legacy = row.legacy_data || {};
   const customerCode = customerDisplayCode(row);
+  const customerName = row.contact_name || legacy.name || row.company_name || legacy.company || customerCode;
   const activePhoneNumbers = Array.isArray(phoneNumbers)
     ? phoneNumbers.filter((phone) => !phone.archivedAt)
     : [];
@@ -43,7 +44,7 @@ export function toUiCustomer(row, { includePrivateDetails = true, phoneNumbers =
     organizationId: row.organization_id || legacy.organizationId || legacy.organization_id || undefined,
     customerCode,
     code: customerCode,
-    name: row.contact_name || legacy.name || row.company_name,
+    name: customerName,
     company: row.company_name || legacy.company || "",
     phone: primaryPhone,
     phoneNumbers: activePhoneNumbers,
@@ -60,7 +61,7 @@ export function toUiCustomer(row, { includePrivateDetails = true, phoneNumbers =
   if (includePrivateDetails) return customer;
   return {
     ...customer,
-    name: customerCode,
+    name: customerName,
     company: customerCode,
     phone: "",
     phoneNumbers: [],
