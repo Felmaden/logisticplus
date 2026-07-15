@@ -11,7 +11,6 @@ import { QUOTATIONS_UI_ENABLED, SHIPMENT_TEMPLATE_ADMIN_UI_ENABLED } from "./con
 import { installClientErrorReporting } from "./lib/errorReporting";
 import { installClientPerformanceMonitoring } from "./lib/clientPerformance";
 import { useAppStore } from "./store/useAppStore";
-import { TooltipProvider } from "@/components/ui/tooltip";
 
 const LazyToaster = lazy(() =>
   import("sonner").then(({ Toaster }) => ({
@@ -176,16 +175,14 @@ export default function App() {
 
   return (
     <Router>
-      <TooltipProvider>
-        <Suspense fallback={null}>
-          <LazyToaster />
-        </Suspense>
-        <div className="h-full">
-          <ClientErrorBoundary>
-            <AppRoutes />
-          </ClientErrorBoundary>
-        </div>
-      </TooltipProvider>
+      <Suspense fallback={null}>
+        <LazyToaster />
+      </Suspense>
+      <div className="h-full">
+        <ClientErrorBoundary>
+          <AppRoutes />
+        </ClientErrorBoundary>
+      </div>
     </Router>
   );
 }
