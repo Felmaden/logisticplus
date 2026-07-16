@@ -1,10 +1,10 @@
 # Production-Safe Cleanup Release Train
 
-Production remains at Liara release `v120` and Git SHA `f57ad269fc0f7ab0c3b686a02acf72b61628c357` until the recovery baseline, object-mode staging, rollback rehearsal, and draft PRs 00-02 are all green.
+Production remains at Liara release `v120` and Git SHA `f57ad269fc0f7ab0c3b686a02acf72b61628c357` until PRs 00-02 are integrated sequentially, the final exact SHA passes staging validation, and production deployment receives explicit approval.
 
 ## Recovery Baseline Status
 
-The 2026-07-16 recovery gate is green: the dependency lock is installable under Node 22, source contains all 36 checksum-verified production migrations, the encrypted database dump restores cleanly on PostgreSQL 16, all 155 copied objects passed size and checksum verification, and the disposable restore was destroyed. Production was not deployed or migrated. Object-mode staging initialization, smoke testing, and rollback rehearsal remain required before these draft PRs can be marked review-ready.
+The 2026-07-16 recovery gate is green: the dependency lock is installable under Node 22, source contains all 36 checksum-verified production migrations, the encrypted database dump restores cleanly on PostgreSQL 16, all 155 copied objects passed size and checksum verification, and the disposable restore was destroyed. Object-mode staging initialization, synthetic smoke testing, and rollback/roll-forward rehearsal also passed with zero-downtime enabled. Staging release `v5` is READY at PR 02 SHA `f87ef4227f941095e4bc135afb9e9ec567235912`; production was not deployed or migrated.
 
 ## Release Units
 
