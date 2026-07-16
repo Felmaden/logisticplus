@@ -9,6 +9,7 @@ import {
   expectPublicTrackingPayloadIsSafe,
   loginApi,
   readOk,
+  resetRateLimitBuckets,
   uploadDocument,
 } from "./helpers";
 
@@ -112,10 +113,15 @@ test.describe.serial("Phase 5 document storage foundation", () => {
   test.skip(!phase5StorageEnabled, "Run with DOCUMENT_STORAGE_MODE=dual and OBJECT_STORAGE_PROVIDER=local-mock.");
 
   test.beforeAll(async () => {
+    await resetRateLimitBuckets();
     const resolved = path.resolve(process.cwd(), testObjectStorageDir);
     expect(resolved.toLowerCase()).toContain("test");
     await fs.rm(resolved, { recursive: true, force: true });
     await fs.mkdir(resolved, { recursive: true });
+  });
+
+  test.afterAll(async () => {
+    await resetRateLimitBuckets();
   });
 
   test("dual-writes uploads/replacements, keeps public DTOs safe, and redacts audit storage values", async () => {

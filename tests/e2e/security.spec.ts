@@ -14,14 +14,11 @@ import {
   loginApi,
   loginViaUi,
   readOk,
+  resetRateLimitBuckets,
   uploadDocument,
   uniqueEmail,
 } from "./helpers";
 import { NORMAL_APP_ROUTE_FAMILIES, RBAC_TENANT_POLICY } from "./rbac-policy";
-
-async function resetRateLimitBuckets() {
-  await dbQuery("DELETE FROM rate_limit_buckets");
-}
 
 async function grantPlatformAdminPermission(userId: string, grantedById = "u1") {
   await dbQuery(

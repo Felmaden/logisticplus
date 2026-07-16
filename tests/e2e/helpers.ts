@@ -28,6 +28,10 @@ export async function dbQuery(sql: string, params: any[] = []) {
   }
 }
 
+export async function resetRateLimitBuckets() {
+  await dbQuery("DELETE FROM rate_limit_buckets");
+}
+
 export function currentTehranShamsiParts() {
   const parts = new Intl.DateTimeFormat("en-US-u-ca-persian", {
     timeZone: "Asia/Tehran",
