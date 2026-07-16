@@ -60,7 +60,7 @@ liara shell --app logisticplus-staging --command "npm run db:migrate"
 liara shell --app logisticplus-staging --command "npm run db:migrate:status"
 ```
 
-4. Confirm the staging migration names and checksums exactly match production, with no pending, missing, or extra entries. At the recovery baseline captured on 2026-07-15, production recorded 36 migrations while this branch contained 33 files. Do not initialize staging until the three deployed migration files have been restored to source and their checksums verified in a separate migration-history repair.
+4. Confirm the staging migration names and checksums exactly match production, with no pending, missing, or extra entries. The 2026-07-16 recovery gate restored the three previously missing deployed files and verified all 36 production migration names and checksums. Stop if staging reports any drift from that repaired source history.
 5. Dry-run, then commit only the approved core and admin bootstrap commands:
 
 ```powershell

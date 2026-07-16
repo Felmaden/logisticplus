@@ -2,6 +2,10 @@
 
 Production remains at Liara release `v120` and Git SHA `f57ad269fc0f7ab0c3b686a02acf72b61628c357` until the recovery baseline, object-mode staging, rollback rehearsal, and draft PRs 00-02 are all green.
 
+## Recovery Baseline Status
+
+The 2026-07-16 recovery gate is green: the dependency lock is installable under Node 22, source contains all 36 checksum-verified production migrations, the encrypted database dump restores cleanly on PostgreSQL 16, all 155 copied objects passed size and checksum verification, and the disposable restore was destroyed. Production was not deployed or migrated. Object-mode staging initialization, smoke testing, and rollback rehearsal remain required before these draft PRs can be marked review-ready.
+
 ## Release Units
 
 Each row is a separate, independently reversible PR and production release.
@@ -32,7 +36,7 @@ Each row is a separate, independently reversible PR and production release.
 Do not advance a unit unless all earlier gates remain green:
 
 - A fresh encrypted database backup and complete read-only object copy have verified manifests; a PostgreSQL 16 restore rehearsal and object-reference/checksum checks pass.
-- Production migration history and source must contain the same names and checksums. The 2026-07-15 baseline found 36 applied production migrations but only 33 files at the release SHA; the three exact deployed files were recovered and checksum-verified for recovery evidence, but staging and deployment remain blocked until source history is repaired in a separate review.
+- Production migration history and source must contain the same names and checksums. The three files missing at the 2026-07-15 release baseline were restored in the separately reviewed migration-history repair, and all 36 names and checksums were verified on 2026-07-16. Any later drift blocks the train.
 - The disposable restored database and its PostgreSQL data directory have been destroyed; encrypted originals remain under the approved retention policy.
 - Synthetic object-mode staging passes migration status, full smoke, and rollback/roll-forward rehearsal with zero-downtime enabled.
 - The exact commit passes the required Node 22 release commands. Phase-specific security, tenant, document, route, and UI tests also pass.
