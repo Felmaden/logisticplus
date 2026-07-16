@@ -187,7 +187,7 @@ Command notes:
 - `npm run smoke:production-config` confirms production startup checks fail loudly when required Liara storage/rate-limit settings are unsafe.
 - `npm run smoke:staging` validates a deployed Liara staging app when `STAGING_PUBLIC_URL` is set.
 - `npm run deploy` runs `liara deploy` and requires Liara CLI authentication plus the correct fresh app selected or passed with `--app`.
-- `npm run deploy:staging` deploys with `liara.staging.json`, app `logisticplus-staging`, and disk mount `logisticplus-documents-staging:storage/documents`.
+- `npm run deploy:staging` deploys with `liara.staging.json` to the object-mode app `logisticplus-staging` without a persistent disk mount.
 
 Production start:
 
@@ -271,7 +271,7 @@ Run a Liara database backup before `--apply`. The utility preserves the owner us
 
 ### Liara Staging Validation
 
-Use the staging runbook in [docs/liara-staging-validation.md](docs/liara-staging-validation.md) before production cutover. The staging path uses a separate Liara app, PostgreSQL database, and disk, then validates health, password login, document storage, public tracking, and removed self-serve APIs.
+Use the staging runbook in [docs/liara-staging-validation.md](docs/liara-staging-validation.md) before production cutover. The staging path uses an isolated network, app, PostgreSQL database, and private object-storage bucket, then validates health, password login, document storage, public tracking, and removed self-serve APIs with synthetic data only.
 
 Useful Liara references:
 
