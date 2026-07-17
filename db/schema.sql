@@ -1193,7 +1193,7 @@ CREATE TABLE IF NOT EXISTS chat_message_attachments (
   deleted_reason TEXT,
   storage_deleted_at TIMESTAMPTZ,
   storage_delete_error TEXT,
-  CONSTRAINT chat_message_attachments_type_check CHECK (attachment_type IN ('image', 'document')),
+  CONSTRAINT chat_message_attachments_type_check CHECK (attachment_type IN ('image', 'document', 'audio')),
   CONSTRAINT chat_message_attachments_size_check CHECK (size_bytes >= 0)
 );
 

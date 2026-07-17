@@ -79,6 +79,7 @@ export const RBAC_TENANT_POLICY: RoutePolicy[] = [
   { family: "chat", method: "GET", path: "/api/shipments/:shipmentId/chat-thread", auth: "required", permission: "chat.use|shipments.view_all|shipments.view_assigned", tenantScope: "own-organization" },
   { family: "chat", method: "POST", path: "/api/chat/direct", auth: "required", permission: "chat.use", tenantScope: "own-organization" },
   { family: "chat", method: "POST", path: "/api/chat/threads", auth: "required", permission: "chat.manage_groups", tenantScope: "own-organization" },
+  { family: "chat", method: "DELETE", path: "/api/chat/threads/:id", auth: "required", permission: "chat.manage_groups", tenantScope: "own-organization" },
   { family: "chat", method: "GET", path: "/api/chat/threads/:id/messages", auth: "required", permission: "chat.use", tenantScope: "own-organization" },
   { family: "chat", method: "POST", path: "/api/chat/threads/:id/messages", auth: "required", permission: "chat.use", tenantScope: "own-organization" },
   { family: "chat", method: "POST", path: "/api/chat/threads/:id/read", auth: "required", permission: "chat.use", tenantScope: "own-organization" },

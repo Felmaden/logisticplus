@@ -9,11 +9,14 @@ import {
   Image as ImageIcon,
   Loader2,
   MessageSquare,
+  Mic,
   Paperclip,
   Plus,
   Search,
   Send,
+  Settings,
   Ship,
+  Square,
   Trash2,
   Users,
   X,
@@ -22,7 +25,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { DeleteConfirmDialog } from "@/src/components/DeleteConfirmDialog";
 import { EmptyState } from "@/src/components/EmptyState";
 import { useAppStore } from "@/src/store/useAppStore";
 
@@ -36,6 +47,7 @@ type ChatParticipant = {
   roleName: string;
   avatar?: string;
   isOnline?: boolean;
+  memberRole?: "owner" | "admin" | "member";
 };
 
 type ChatAttachment = {
@@ -46,7 +58,7 @@ type ChatAttachment = {
   contentType: string;
   sizeBytes: number;
   fileSize: string;
-  attachmentType: "image" | "document";
+  attachmentType: "image" | "document" | "audio";
   createdAt: string;
   deletedAt?: string | null;
   deletedReason?: string | null;
@@ -116,9 +128,15 @@ const CHAT_FILE_DELETED_MESSAGE = "این فایل حذف شده است";
 const CHAT_FILE_MANAGER_DELETED_MESSAGE = "فایل توسط مدیر حذف شده است";
 const CHAT_FILE_TYPE_ERROR = "فرمت فایل مجاز نیست";
 const CHAT_FILE_SIZE_ERROR = "حجم فایل بیش از حد مجاز است";
-const CHAT_ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.txt,.csv";
+const CHAT_ATTACHMENT_ACCEPT = ".jpg,.jpeg,.png,.webp,.pdf,.docx,.xlsx,.txt,.csv,.webm,.ogg,.m4a";
 const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const CHAT_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
 const CHAT_FILE_MAX_BYTES = 15 * 1024 * 1024;
+const CHAT_VOICE_MAX_SECONDS = 5 * 60;
+const CHAT_VOICE_UNSUPPORTED_MESSAGE = "مرورگر شما از ضبط پیام صوتی پشتیبانی نمی‌کند.";
+const CHAT_VOICE_PERMISSION_MESSAGE = "دسترسی میکروفن داده نشد. لطفاً مجوز میکروفن را بررسی کنید.";
+const CHAT_VOICE_EMPTY_MESSAGE = "پیام صوتی ضبط نشد. لطفاً دوباره تلاش کنید.";
+const CHAT_VOICE_MIME_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg", "audio/mp4"];
 const CHAT_CATEGORIES: Array<{ type: ChatCategory; label: string; shortLabel: string }> = [
   { type: "DM", label: "پیام‌های مستقیم", shortLabel: "مستقیم" },
   { type: "GROUP", label: "گروه‌ها", shortLabel: "گروه" },
@@ -181,7 +199,20 @@ function messagePreviewText(message?: ChatMessage | null) {
   if (body) return body;
   const firstAttachment = message.attachments?.[0];
   if (!firstAttachment) return "";
-  return firstAttachment.attachmentType === "image" ? "تصویر" : firstAttachment.filename || "فایل";
+  if (firstAttachment.attachmentType === "image") return "تصویر";
+  if (firstAttachment.attachmentType === "audio") return "پیام صوتی";
+  return firstAttachment.filename || "فایل";
+}
+
+function voiceFileExtension(mimeType = "") {
+  if (mimeType.startsWith("audio/mp4")) return "m4a";
+  if (mimeType.startsWith("audio/ogg")) return "ogg";
+  return "webm";
+}
+
+function recordingTimestamp(seconds = 0) {
+  const minutes = Math.floor(seconds / 60);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
 function attachmentDeletedLabel(attachment: ChatAttachment) {
@@ -193,9 +224,11 @@ function attachmentDeletedLabel(attachment: ChatAttachment) {
 function validateAttachmentFile(file: File) {
   const extension = `.${file.name.split(".").pop() || ""}`.toLowerCase();
   const isImage = [".jpg", ".jpeg", ".png", ".webp"].includes(extension);
+  const isAudio = [".webm", ".ogg", ".m4a"].includes(extension);
   const isDocument = [".pdf", ".docx", ".xlsx", ".txt", ".csv"].includes(extension);
-  if (!isImage && !isDocument) return CHAT_FILE_TYPE_ERROR;
+  if (!isImage && !isAudio && !isDocument) return CHAT_FILE_TYPE_ERROR;
   if (isImage && file.size > CHAT_IMAGE_MAX_BYTES) return CHAT_FILE_SIZE_ERROR;
+  if (isAudio && file.size > CHAT_AUDIO_MAX_BYTES) return CHAT_FILE_SIZE_ERROR;
   if (file.size > CHAT_FILE_MAX_BYTES) return CHAT_FILE_SIZE_ERROR;
   return "";
 }
@@ -249,6 +282,13 @@ export default function Chat() {
   const [isGroupPanelOpen, setIsGroupPanelOpen] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [groupParticipantIds, setGroupParticipantIds] = useState<string[]>([]);
+  const [isGroupSettingsOpen, setIsGroupSettingsOpen] = useState(false);
+  const [groupMemberSearch, setGroupMemberSearch] = useState("");
+  const [addingGroupMemberId, setAddingGroupMemberId] = useState("");
+  const [groupToArchive, setGroupToArchive] = useState<ChatThread | null>(null);
+  const [previewAttachment, setPreviewAttachment] = useState<ChatAttachment | null>(null);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const activeThreadIdRef = useRef(activeThreadId);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -268,6 +308,11 @@ export default function Chat() {
   const latestMessageBatchRef = useRef<{ length: number; lastMessageId: string }>({ length: 0, lastMessageId: "" });
   const pendingBottomScrollRef = useRef<ScrollBehavior | null>(null);
   const initialBottomScrolledThreadRef = useRef("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recordingCancelledRef = useRef(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
 
   const activeThread = useMemo(
@@ -292,6 +337,28 @@ export default function Chat() {
       }
     };
   }, [selectedAttachmentPreviewUrl]);
+
+  useEffect(() => {
+    return () => {
+      recordingCancelledRef.current = true;
+      if (recordingTimerRef.current !== null) window.clearInterval(recordingTimerRef.current);
+      if (mediaRecorderRef.current?.state !== "inactive") mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    setIsGroupSettingsOpen(false);
+    setGroupMemberSearch("");
+    setSelectedAttachmentFile(null);
+    setSelectedAttachmentPreviewUrl("");
+    setRecordingSeconds(0);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (mediaRecorderRef.current?.state === "recording") {
+      recordingCancelledRef.current = true;
+      mediaRecorderRef.current.stop();
+    }
+  }, [activeThreadId]);
 
   useEffect(() => {
     if (!sendLockedUntil) return;
@@ -360,6 +427,17 @@ export default function Chat() {
     });
   }, [currentUser?.id, participants, searchTerm]);
 
+  const availableGroupParticipants = useMemo(() => {
+    if (activeThread?.type !== "GROUP") return [];
+    const memberIds = new Set(activeThread.members.map((member) => member.userId));
+    const query = groupMemberSearch.trim().toLowerCase();
+    return participants.filter((participant) => {
+      if (memberIds.has(participant.userId)) return false;
+      if (!query) return true;
+      return `${participant.displayName} ${participant.email} ${participant.roleName}`.toLowerCase().includes(query);
+    });
+  }, [activeThread, groupMemberSearch, participants]);
+
   const isSendLocked = sendLockedUntil > Date.now();
 
   const activeTypingNames = useMemo(() => {
@@ -374,8 +452,15 @@ export default function Chat() {
 
   const loadThreads = async () => {
     const data = await apiJson<ChatThread[]>("/api/chat/threads");
-    setThreads(data || []);
-    setActiveThreadId((current) => current || data?.[0]?.id || "");
+    const nextThreads = data || [];
+    setThreads(nextThreads);
+    const currentId = activeThreadIdRef.current;
+    if (currentId && nextThreads.some((thread) => thread.id === currentId)) return;
+    const fallbackId = nextThreads[0]?.id || "";
+    activeThreadIdRef.current = fallbackId;
+    setActiveThreadId(fallbackId);
+    setMessages([]);
+    window.history.replaceState(null, "", fallbackId ? `/chat?threadId=${encodeURIComponent(fallbackId)}` : "/chat");
   };
 
   const loadParticipants = async () => {
@@ -762,7 +847,111 @@ export default function Chat() {
   const clearSelectedAttachment = () => {
     setSelectedAttachmentFile(null);
     setSelectedAttachmentPreviewUrl("");
+    setRecordingSeconds(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const releaseVoiceRecorder = () => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    mediaRecorderRef.current = null;
+  };
+
+  const stopVoiceRecording = () => {
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  };
+
+  const cancelVoiceRecording = () => {
+    recordingCancelledRef.current = true;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+    releaseVoiceRecorder();
+    setIsRecordingVoice(false);
+    setRecordingSeconds(0);
+  };
+
+  const startVoiceRecording = async () => {
+    if (!activeThread || selectedAttachmentFile || isRecordingVoice) return;
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setError(CHAT_VOICE_UNSUPPORTED_MESSAGE);
+      return;
+    }
+    setError("");
+    clearSelectedAttachment();
+    recordingCancelledRef.current = false;
+    recordingChunksRef.current = [];
+    setRecordingSeconds(0);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      mediaStreamRef.current = stream;
+      const mimeType = typeof MediaRecorder.isTypeSupported === "function"
+        ? CHAT_VOICE_MIME_TYPES.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || ""
+        : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) recordingChunksRef.current.push(event.data);
+      };
+      recorder.onerror = () => {
+        recordingCancelledRef.current = true;
+        releaseVoiceRecorder();
+        setIsRecordingVoice(false);
+        setRecordingSeconds(0);
+        setError(CHAT_VOICE_UNSUPPORTED_MESSAGE);
+      };
+      recorder.onstop = () => {
+        const wasCancelled = recordingCancelledRef.current;
+        const chunks = [...recordingChunksRef.current];
+        const recordedMimeType = recorder.mimeType || mimeType || "audio/webm";
+        releaseVoiceRecorder();
+        setIsRecordingVoice(false);
+        if (wasCancelled) {
+          setRecordingSeconds(0);
+          return;
+        }
+        const blob = new Blob(chunks, { type: recordedMimeType });
+        if (!blob.size) {
+          setError(CHAT_VOICE_EMPTY_MESSAGE);
+          setRecordingSeconds(0);
+          return;
+        }
+        if (blob.size > CHAT_AUDIO_MAX_BYTES) {
+          setError(CHAT_FILE_SIZE_ERROR);
+          setRecordingSeconds(0);
+          return;
+        }
+        const extension = voiceFileExtension(recordedMimeType);
+        const file = new File([blob], `voice-message-${Date.now()}.${extension}`, { type: recordedMimeType });
+        setSelectedAttachmentFile(file);
+        setSelectedAttachmentPreviewUrl(URL.createObjectURL(file));
+      };
+      recorder.start(1000);
+      setIsRecordingVoice(true);
+      const startedAt = Date.now();
+      recordingTimerRef.current = window.setInterval(() => {
+        const elapsed = Math.min(CHAT_VOICE_MAX_SECONDS, Math.floor((Date.now() - startedAt) / 1000));
+        setRecordingSeconds(elapsed);
+        if (elapsed >= CHAT_VOICE_MAX_SECONDS && recorder.state !== "inactive") recorder.stop();
+      }, 250);
+    } catch (nextError) {
+      releaseVoiceRecorder();
+      setIsRecordingVoice(false);
+      setRecordingSeconds(0);
+      setError(nextError instanceof DOMException && nextError.name === "NotAllowedError"
+        ? CHAT_VOICE_PERMISSION_MESSAGE
+        : CHAT_VOICE_UNSUPPORTED_MESSAGE);
+    }
   };
 
   const selectThread = (threadId: string) => {
@@ -770,6 +959,7 @@ export default function Chat() {
     if (nextThread && nextThread.type !== activeCategory) {
       setActiveCategory(nextThread.type);
     }
+    if (isRecordingVoice) cancelVoiceRecording();
     clearSelectedAttachment();
     setActiveThreadId(threadId);
     window.history.replaceState(null, "", `/chat?threadId=${encodeURIComponent(threadId)}`);
@@ -779,6 +969,7 @@ export default function Chat() {
   const changeCategory = (category: ChatCategory) => {
     setActiveCategory(category);
     if (category !== "GROUP") setIsGroupPanelOpen(false);
+    if (isRecordingVoice) cancelVoiceRecording();
     clearSelectedAttachment();
     const firstThread = threads.find((thread) => thread.type === category);
     if (firstThread) {
@@ -842,6 +1033,40 @@ export default function Chat() {
     );
   };
 
+  const addGroupMember = async (participant: ChatParticipant) => {
+    if (activeThread?.type !== "GROUP" || addingGroupMemberId) return;
+    setAddingGroupMemberId(participant.userId);
+    setError("");
+    try {
+      await apiJson(`/api/chat/threads/${encodeURIComponent(activeThread.id)}/participants`, {
+        method: "POST",
+        body: JSON.stringify({ userId: participant.userId }),
+      });
+      setGroupMemberSearch("");
+      await loadThreads();
+    } catch (nextError: any) {
+      setError(nextError?.message || CHAT_SEND_FAILED_MESSAGE);
+    } finally {
+      setAddingGroupMemberId("");
+    }
+  };
+
+  const archiveGroup = async () => {
+    if (!groupToArchive) return;
+    const archivedId = groupToArchive.id;
+    await apiJson<{ id: string; archivedAt: string }>(`/api/chat/threads/${encodeURIComponent(archivedId)}`, {
+      method: "DELETE",
+    });
+    setIsGroupSettingsOpen(false);
+    if (activeThreadIdRef.current === archivedId) {
+      activeThreadIdRef.current = "";
+      setActiveThreadId("");
+      setMessages([]);
+      window.history.replaceState(null, "", "/chat");
+    }
+    await loadThreads();
+  };
+
   const applyAttachmentUpdate = (messageId: string, attachment: ChatAttachment) => {
     setMessages((items) => items.map((item) => {
       if (item.id !== messageId) return item;
@@ -880,6 +1105,7 @@ export default function Chat() {
         {attachments.map((attachment) => {
           const isDeleted = Boolean(attachment.deletedAt);
           const canDeleteAttachment = !isDeleted && (isMine || canDeleteMedia);
+          const isPdf = attachment.contentType.split(";")[0].trim().toLowerCase() === "application/pdf";
           if (isDeleted) {
             return (
               <div
@@ -896,13 +1122,42 @@ export default function Chat() {
             );
           }
 
+          if (attachment.attachmentType === "audio" && attachment.previewUrl) {
+            return (
+              <div
+                key={attachment.id}
+                className={cn(
+                  "min-w-[min(18rem,70vw)] space-y-2 rounded-lg border px-3 py-2",
+                  isMine ? "border-primary-foreground/30 bg-primary-foreground/10" : "border-border bg-muted/40"
+                )}
+                data-testid="chat-audio-attachment"
+              >
+                <audio controls preload="metadata" src={attachment.previewUrl} className="h-10 w-full max-w-full" />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-[10px] font-bold opacity-80">پیام صوتی · {attachment.fileSize}</span>
+                  {canDeleteAttachment && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 rounded-lg text-destructive hover:text-destructive"
+                      onClick={() => void deleteAttachment(message, attachment)}
+                      aria-label="Delete attachment"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
           if (attachment.attachmentType === "image" && attachment.previewUrl) {
             return (
               <div key={attachment.id} className="space-y-2" data-testid="chat-image-attachment">
-                <a
-                  href={attachment.previewUrl}
-                  target="_blank"
-                  rel="noreferrer"
+                <button
+                  type="button"
+                  onClick={() => setPreviewAttachment(attachment)}
                   className="block overflow-hidden rounded-lg border border-border/60 bg-background"
                   aria-label={attachment.filename}
                 >
@@ -912,12 +1167,17 @@ export default function Chat() {
                     className="max-h-64 w-full max-w-sm object-contain"
                     loading="lazy"
                   />
-                </a>
+                </button>
                 <div className="flex flex-wrap items-center gap-1">
-                  <Button asChild variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
-                    <a href={attachment.previewUrl} target="_blank" rel="noreferrer" aria-label="Preview attachment">
-                      <Eye className="h-4 w-4" />
-                    </a>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 rounded-lg"
+                    onClick={() => setPreviewAttachment(attachment)}
+                    aria-label="Preview attachment"
+                  >
+                    <Eye className="h-4 w-4" />
                   </Button>
                   {attachment.downloadUrl && (
                     <Button asChild variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
@@ -960,6 +1220,18 @@ export default function Chat() {
                 <p className="truncate text-[11px] font-black">{attachment.filename}</p>
                 <p className="text-[10px] font-bold opacity-75">{attachment.fileSize}</p>
               </div>
+              {isPdf && attachment.previewUrl && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-lg"
+                  onClick={() => setPreviewAttachment(attachment)}
+                  aria-label="Preview attachment"
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+              )}
               {attachment.downloadUrl && (
                 <Button asChild variant="ghost" size="icon" className="h-8 w-8 shrink-0 rounded-lg">
                   <a href={attachment.downloadUrl} target="_blank" rel="noreferrer" aria-label="Download attachment">
@@ -1339,20 +1611,36 @@ export default function Chat() {
                 </div>
               )}
             </div>
-            {activeThread?.type === "SHIPMENT" && (activeThread.shipmentDetailUrl || activeThread.shipmentId) && (
-              <Button
-                type="button"
-                variant="outline"
-                className="hidden h-10 shrink-0 gap-2 rounded-lg text-xs font-black sm:inline-flex"
-                onClick={() => {
-                  window.location.href = activeThread.shipmentDetailUrl || `/shipments/${encodeURIComponent(activeThread.shipmentId || "")}`;
-                }}
-                data-testid="chat-open-shipment"
-              >
-                <ExternalLink className="h-4 w-4" />
-                مشاهده محموله
-              </Button>
-            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {canManageGroups && activeThread?.type === "GROUP" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10 rounded-lg"
+                  onClick={() => setIsGroupSettingsOpen(true)}
+                  data-testid="chat-group-settings-button"
+                  aria-label="تنظیمات گروه"
+                  title="تنظیمات گروه"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              )}
+              {activeThread?.type === "SHIPMENT" && (activeThread.shipmentDetailUrl || activeThread.shipmentId) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="hidden h-10 shrink-0 gap-2 rounded-lg text-xs font-black sm:inline-flex"
+                  onClick={() => {
+                    window.location.href = activeThread.shipmentDetailUrl || `/shipments/${encodeURIComponent(activeThread.shipmentId || "")}`;
+                  }}
+                  data-testid="chat-open-shipment"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  مشاهده محموله
+                </Button>
+              )}
+            </div>
           </header>
 
           {error && (
@@ -1427,9 +1715,51 @@ export default function Chat() {
                 onChange={handleAttachmentChange}
                 data-testid="chat-attachment-input"
               />
+              {isRecordingVoice && (
+                <div className="mb-2 flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2" data-testid="chat-voice-recording">
+                  <span className="relative flex h-3 w-3 shrink-0">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-60" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-destructive" />
+                  </span>
+                  <span className="min-w-0 flex-1 text-xs font-black">در حال ضبط پیام صوتی</span>
+                  <span className="font-mono text-xs font-black tabular-nums" data-testid="chat-voice-timer">
+                    {recordingTimestamp(recordingSeconds)} / 05:00
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 rounded-lg text-xs font-black"
+                    onClick={cancelVoiceRecording}
+                    data-testid="chat-voice-cancel"
+                  >
+                    <X className="ml-1 h-4 w-4" />
+                    انصراف
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="h-8 rounded-lg text-xs font-black"
+                    onClick={stopVoiceRecording}
+                    data-testid="chat-voice-stop"
+                  >
+                    <Square className="ml-1 h-3.5 w-3.5 fill-current" />
+                    توقف
+                  </Button>
+                </div>
+              )}
               {selectedAttachmentFile && (
                 <div className="mb-2 flex min-w-0 items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2" data-testid="chat-selected-attachment">
-                  {selectedAttachmentPreviewUrl ? (
+                  {selectedAttachmentFile.type.startsWith("audio/") && selectedAttachmentPreviewUrl ? (
+                    <audio
+                      controls
+                      preload="metadata"
+                      src={selectedAttachmentPreviewUrl}
+                      className="h-10 min-w-0 flex-1"
+                      data-testid="chat-voice-preview"
+                    />
+                  ) : selectedAttachmentPreviewUrl ? (
                     <img
                       src={selectedAttachmentPreviewUrl}
                       alt={selectedAttachmentFile.name}
@@ -1440,10 +1770,14 @@ export default function Chat() {
                       <FileIcon className="h-5 w-5" />
                     </span>
                   )}
-                  <div className="min-w-0 flex-1">
+                  <div className={cn("min-w-0 flex-1", selectedAttachmentFile.type.startsWith("audio/") && "hidden sm:block")}>
                     <p className="truncate text-xs font-black">{selectedAttachmentFile.name}</p>
                     <p className="text-[10px] font-bold text-muted-foreground">
-                      {selectedAttachmentFile.type.startsWith("image/") ? "تصویر" : "فایل"} · {Math.ceil(selectedAttachmentFile.size / 1024)} KB
+                      {selectedAttachmentFile.type.startsWith("image/")
+                        ? "تصویر"
+                        : selectedAttachmentFile.type.startsWith("audio/")
+                          ? `پیام صوتی · ${recordingTimestamp(recordingSeconds)}`
+                          : "فایل"} · {Math.ceil(selectedAttachmentFile.size / 1024)} KB
                     </p>
                   </div>
                   <Button
@@ -1464,7 +1798,7 @@ export default function Chat() {
                   variant="ghost"
                   size="icon"
                   className="h-11 w-11 shrink-0 rounded-lg"
-                  disabled={!activeThread || isSending || isSendLocked}
+                  disabled={!activeThread || isSending || isSendLocked || isRecordingVoice || Boolean(selectedAttachmentFile)}
                   onClick={() => fileInputRef.current?.click()}
                   data-testid="chat-attach-button"
                   aria-label="پیوست فایل"
@@ -1472,10 +1806,23 @@ export default function Chat() {
                 >
                   {selectedAttachmentFile?.type.startsWith("image/") ? <ImageIcon className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}
                 </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={cn("h-11 w-11 shrink-0 rounded-lg", isRecordingVoice && "text-destructive")}
+                  disabled={!activeThread || isSending || isSendLocked || isRecordingVoice || Boolean(selectedAttachmentFile)}
+                  onClick={() => void startVoiceRecording()}
+                  data-testid="chat-voice-button"
+                  aria-label="ضبط پیام صوتی"
+                  title="ضبط پیام صوتی"
+                >
+                  <Mic className="h-4 w-4" />
+                </Button>
                 <Input
                   value={newMessage}
                   onChange={handleComposerChange}
-                  disabled={!activeThread}
+                  disabled={!activeThread || isRecordingVoice}
                   maxLength={CHAT_MESSAGE_MAX_LENGTH}
                   placeholder={activeThread ? "پیام داخلی خود را بنویسید..." : "ابتدا یک گفتگو انتخاب کنید"}
                   className="h-11 min-w-0 flex-1 border-0 bg-transparent text-xs font-bold focus-visible:ring-0"
@@ -1485,7 +1832,7 @@ export default function Chat() {
                   type="submit"
                   size="icon"
                   className="h-11 w-11 shrink-0 rounded-lg"
-                  disabled={!activeThread || (!newMessage.trim() && !selectedAttachmentFile) || isSending || isSendLocked}
+                  disabled={!activeThread || isRecordingVoice || (!newMessage.trim() && !selectedAttachmentFile) || isSending || isSendLocked}
                   data-testid="chat-send-button"
                   aria-label="ارسال پیام"
                 >
@@ -1496,6 +1843,142 @@ export default function Chat() {
           </form>
         </section>
       </div>
+
+      <Dialog open={isGroupSettingsOpen} onOpenChange={setIsGroupSettingsOpen}>
+        <DialogContent className="flex max-h-[85dvh] w-[calc(100vw-1.5rem)] max-w-lg flex-col overflow-hidden p-0 sm:w-full" dir="rtl">
+          <DialogHeader className="shrink-0 border-b border-border px-4 py-4 text-right">
+            <DialogTitle className="text-base font-black">تنظیمات گروه</DialogTitle>
+            <DialogDescription className="text-xs font-bold">
+              اعضای فعلی را ببینید یا همکار جدیدی به گروه اضافه کنید.
+            </DialogDescription>
+          </DialogHeader>
+          {activeThread?.type === "GROUP" && (
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+              <section>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h2 className="text-xs font-black">اعضای فعلی</h2>
+                  <Badge variant="secondary" className="rounded-md text-[10px]">{activeThread.members.length} عضو</Badge>
+                </div>
+                <div className="space-y-1 rounded-lg border border-border p-2" data-testid="chat-group-member-list">
+                  {activeThread.members.map((member) => (
+                    <div key={member.userId} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5">
+                      {renderParticipantAvatar(member, "h-8 w-8")}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-black">{member.displayName}</p>
+                        <p className="truncate text-[10px] font-bold text-muted-foreground">{member.roleName || member.email}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section>
+                <h2 className="mb-2 text-xs font-black">افزودن همکار</h2>
+                <div className="relative mb-2">
+                  <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={groupMemberSearch}
+                    onChange={(event) => setGroupMemberSearch(event.target.value)}
+                    placeholder="جستجوی نام، ایمیل یا نقش"
+                    className="h-10 pr-10 text-xs font-bold"
+                    data-testid="chat-group-member-search"
+                  />
+                </div>
+                <div className="max-h-52 space-y-1 overflow-y-auto rounded-lg border border-border p-2" data-testid="chat-group-available-users">
+                  {availableGroupParticipants.length ? availableGroupParticipants.map((participant) => (
+                    <div key={participant.userId} className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60">
+                      {renderParticipantAvatar(participant, "h-8 w-8")}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-black">{participant.displayName}</p>
+                        <p className="truncate text-[10px] font-bold text-muted-foreground">
+                          {[participant.roleName, participant.email].filter(Boolean).join(" · ")}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 shrink-0 rounded-lg px-3 text-[10px] font-black"
+                        disabled={Boolean(addingGroupMemberId)}
+                        onClick={() => void addGroupMember(participant)}
+                        data-testid="chat-group-add-member"
+                      >
+                        {addingGroupMemberId === participant.userId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "افزودن"}
+                      </Button>
+                    </div>
+                  )) : (
+                    <p className="px-2 py-5 text-center text-[11px] font-bold text-muted-foreground">همکار واجد شرایط دیگری پیدا نشد.</p>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+                <h2 className="text-xs font-black text-destructive">بایگانی گروه</h2>
+                <p className="mt-1 text-[11px] font-bold leading-5 text-muted-foreground">
+                  گروه از فهرست همه اعضا حذف می‌شود، اما پیام‌ها، فایل‌ها و سوابق آن حفظ خواهند شد.
+                </p>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="mt-3 h-9 rounded-lg text-xs font-black"
+                  onClick={() => {
+                    setGroupToArchive(activeThread);
+                    setIsGroupSettingsOpen(false);
+                  }}
+                  data-testid="chat-group-archive-button"
+                >
+                  <Trash2 className="ml-1.5 h-4 w-4" />
+                  حذف گروه از فهرست
+                </Button>
+              </section>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(previewAttachment)} onOpenChange={(open) => !open && setPreviewAttachment(null)}>
+        <DialogContent className="flex h-[min(88dvh,52rem)] w-[calc(100vw-1rem)] max-w-5xl flex-col overflow-hidden p-0" dir="rtl">
+          <DialogHeader className="shrink-0 border-b border-border px-4 py-3 text-right">
+            <DialogTitle className="truncate pl-10 text-sm font-black">{previewAttachment?.filename}</DialogTitle>
+            <DialogDescription className="text-[11px] font-bold">پیش‌نمایش فایل در برنامه</DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/30 p-2 sm:p-4" data-testid="chat-attachment-preview-dialog">
+            {previewAttachment?.attachmentType === "image" && previewAttachment.previewUrl && (
+              <img src={previewAttachment.previewUrl} alt={previewAttachment.filename} className="max-h-full max-w-full object-contain" />
+            )}
+            {previewAttachment?.contentType.split(";")[0].trim().toLowerCase() === "application/pdf" && previewAttachment.previewUrl && (
+              <iframe
+                src={previewAttachment.previewUrl}
+                title={previewAttachment.filename}
+                className="h-full min-h-[60dvh] w-full rounded-md border-0 bg-background"
+                data-testid="chat-pdf-preview"
+              />
+            )}
+          </div>
+          {previewAttachment?.downloadUrl && (
+            <div className="shrink-0 border-t border-border px-4 py-3">
+              <Button asChild variant="outline" className="h-9 w-full rounded-lg text-xs font-black sm:w-auto">
+                <a href={previewAttachment.downloadUrl} target="_blank" rel="noreferrer">
+                  <Download className="ml-2 h-4 w-4" />
+                  دانلود فایل
+                </a>
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <DeleteConfirmDialog
+        isOpen={Boolean(groupToArchive)}
+        onClose={() => setGroupToArchive(null)}
+        onConfirm={archiveGroup}
+        title="حذف گروه از فهرست"
+        description="این گروه برای همه اعضا بایگانی می‌شود. پیام‌ها، فایل‌ها و سوابق فعالیت حذف نخواهند شد."
+        itemName={groupToArchive ? displayNameForThread(groupToArchive, currentUser?.id) : undefined}
+        confirmLabel="تایید و بایگانی گروه"
+        pendingLabel="در حال بایگانی..."
+      />
     </div>
   );
 }
