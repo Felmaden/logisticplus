@@ -8,8 +8,28 @@ export const USER_PASSWORD = "PlaywrightPass123!";
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL || "postgres://postgres@localhost:5432/logisticplus_test";
 const { Client } = pg;
 
+export function assertTestDatabaseUrl() {
+  const databaseName = new URL(TEST_DATABASE_URL).pathname.replace(/^\//, "").toLowerCase();
+  expect(databaseName).toContain("test");
+}
+
 export function uniqueEmail(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}@example.test`;
+}
+
+export async function dbQuery(sql: string, params: any[] = []) {
+  assertTestDatabaseUrl();
+  const client = new Client({ connectionString: TEST_DATABASE_URL });
+  await client.connect();
+  try {
+    return await client.query(sql, params);
+  } finally {
+    await client.end();
+  }
+}
+
+export async function resetRateLimitBuckets() {
+  await dbQuery("DELETE FROM rate_limit_buckets");
 }
 
 export function currentTehranShamsiParts() {
@@ -34,22 +54,16 @@ export function currentTehranShamsiParts() {
 
 export async function nextValidShipmentCode() {
   const { compactDate } = currentTehranShamsiParts();
-  const client = new Client({ connectionString: TEST_DATABASE_URL });
-  await client.connect();
-  try {
-    const result = await client.query(
-      `SELECT COALESCE(MAX(COALESCE(shamsi_sequence, substring(shipment_code from 9 for 3)::int)), 0)::int AS max_sequence
-       FROM shipments
-       WHERE shipment_code ~ '^\\d{11}$'
-         AND substring(shipment_code from 1 for 8) = $1`,
-      [compactDate]
-    );
-    const nextSequence = Number(result.rows[0]?.max_sequence || 0) + 1;
-    expect(nextSequence).toBeLessThanOrEqual(999);
-    return `${compactDate}${String(nextSequence).padStart(3, "0")}`;
-  } finally {
-    await client.end();
-  }
+  const result = await dbQuery(
+    `SELECT COALESCE(MAX(COALESCE(shamsi_sequence, substring(shipment_code from 9 for 3)::int)), 0)::int AS max_sequence
+     FROM shipments
+     WHERE shipment_code ~ '^\\d{11}$'
+       AND substring(shipment_code from 1 for 8) = $1`,
+    [compactDate]
+  );
+  const nextSequence = Number(result.rows[0]?.max_sequence || 0) + 1;
+  expect(nextSequence).toBeLessThanOrEqual(999);
+  return `${compactDate}${String(nextSequence).padStart(3, "0")}`;
 }
 
 export async function loginViaUi(page: Page, email = OWNER_EMAIL, password = OWNER_PASSWORD) {
@@ -62,6 +76,21 @@ export async function loginViaUi(page: Page, email = OWNER_EMAIL, password = OWN
 
 export async function apiContext() {
   return requestFactory.newContext({ baseURL: BASE_URL });
+}
+
+export async function uploadDocument(
+  context: APIRequestContext,
+  file: { name: string; mimeType: string; buffer: Buffer },
+  fields: Record<string, string> = {}
+) {
+  return context.post("/api/documents/upload", {
+    multipart: {
+      title: fields.title || file.name,
+      type: fields.type || "OTHER",
+      ...fields,
+      file,
+    },
+  });
 }
 
 export async function loginApi(email = OWNER_EMAIL, password = OWNER_PASSWORD) {

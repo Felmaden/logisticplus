@@ -1,11 +1,23 @@
 import { expect, test, type Page } from "@playwright/test";
 import pg from "pg";
-import { BASE_URL, disposeContexts, expectPublicTrackingPayloadIsSafe, loginApi, loginViaUi, nextValidShipmentCode, readOk, uniqueEmail, USER_PASSWORD } from "./helpers";
+import {
+  BASE_URL,
+  USER_PASSWORD,
+  assertTestDatabaseUrl,
+  disposeContexts,
+  expectPublicTrackingPayloadIsSafe,
+  loginApi,
+  loginViaUi,
+  nextValidShipmentCode,
+  readOk,
+  uniqueEmail,
+} from "./helpers";
 
 const { Client } = pg;
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "postgres://postgres@localhost:5432/logisticplus_test";
 
 async function dbClient() {
+  assertTestDatabaseUrl();
   const client = new Client({ connectionString: testDatabaseUrl });
   await client.connect();
   return client;
@@ -559,7 +571,7 @@ test.describe.serial("UX/UI regression sweep", () => {
     }
   });
 
-  test("legacy compliance route redirects and quotation UI routes stay disabled", async ({ page }) => {
+  test("legacy routes redirect and disabled admin and quotation UI routes stay unavailable", async ({ page }) => {
     await loginViaUi(page);
 
     await page.goto("/compliance");
@@ -574,6 +586,14 @@ test.describe.serial("UX/UI regression sweep", () => {
     await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.locator('a[href="/quotations"]')).toHaveCount(0);
     await expect(page.getByTestId("open-quotation-dialog")).toHaveCount(0);
+
+    await page.goto("/admin/shipment-form-templates");
+    await expect(page).toHaveURL(/\/shipments$/);
+    await expect(page.locator('a[href="/admin/shipment-form-templates"]')).toHaveCount(0);
+
+    await page.goto("/admin/workflow-templates");
+    await expect(page).toHaveURL(/\/shipments$/);
+    await expect(page.locator('a[href="/admin/workflow-templates"]')).toHaveCount(0);
   });
 
   test("quotation backend stays available but bootstrap and UI omit quotation data", async ({ page }) => {

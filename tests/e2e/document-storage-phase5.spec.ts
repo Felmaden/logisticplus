@@ -2,16 +2,16 @@ import { expect, test } from "@playwright/test";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
-import pg from "pg";
 import {
   apiContext,
+  dbQuery,
   disposeContexts,
   expectPublicTrackingPayloadIsSafe,
   loginApi,
   readOk,
+  resetRateLimitBuckets,
+  uploadDocument,
 } from "./helpers";
-
-const { Client } = pg;
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL || "postgres://postgres@localhost:5432/logisticplus_test";
 const testDocumentStorageDir = process.env.TEST_DOCUMENT_STORAGE_DIR || "storage/test-documents";
@@ -19,31 +19,6 @@ const testObjectStorageDir = process.env.OBJECT_STORAGE_MOCK_DIR || "storage/tes
 const phase5StorageEnabled =
   process.env.DOCUMENT_STORAGE_MODE === "dual" &&
   process.env.OBJECT_STORAGE_PROVIDER === "local-mock";
-
-async function dbQuery(sql: string, params: any[] = []) {
-  const client = new Client({ connectionString: testDatabaseUrl });
-  await client.connect();
-  try {
-    return await client.query(sql, params);
-  } finally {
-    await client.end();
-  }
-}
-
-async function uploadDocument(
-  context: Awaited<ReturnType<typeof loginApi>>,
-  file: { name: string; mimeType: string; buffer: Buffer },
-  fields: Record<string, string> = {}
-) {
-  return context.post("/api/documents/upload", {
-    multipart: {
-      title: fields.title || file.name,
-      type: fields.type || "OTHER",
-      ...fields,
-      file,
-    },
-  });
-}
 
 function storagePath(storageKey: string) {
   return path.resolve(process.cwd(), testDocumentStorageDir, storageKey);
@@ -73,8 +48,24 @@ function expectNoStorageLeak(value: unknown) {
     "storagebucket",
     "storage_region",
     "storageregion",
+    "storage_provider",
+    "storageprovider",
     "local_path",
     "localpath",
+    "checksum",
+    "checksum_sha256",
+    "size_bytes",
+    "sizebytes",
+    "content_type",
+    "contenttype",
+    "storage_migrated_at",
+    "storagemigratedat",
+    "storage_verified_at",
+    "storageverifiedat",
+    "storage_migration_status",
+    "storagemigrationstatus",
+    "storage_migration_error",
+    "storagemigrationerror",
   ]) {
     expect(serialized).not.toContain(forbidden);
   }
@@ -122,10 +113,15 @@ test.describe.serial("Phase 5 document storage foundation", () => {
   test.skip(!phase5StorageEnabled, "Run with DOCUMENT_STORAGE_MODE=dual and OBJECT_STORAGE_PROVIDER=local-mock.");
 
   test.beforeAll(async () => {
+    await resetRateLimitBuckets();
     const resolved = path.resolve(process.cwd(), testObjectStorageDir);
     expect(resolved.toLowerCase()).toContain("test");
     await fs.rm(resolved, { recursive: true, force: true });
     await fs.mkdir(resolved, { recursive: true });
+  });
+
+  test.afterAll(async () => {
+    await resetRateLimitBuckets();
   });
 
   test("dual-writes uploads/replacements, keeps public DTOs safe, and redacts audit storage values", async () => {
@@ -198,6 +194,9 @@ test.describe.serial("Phase 5 document storage foundation", () => {
       expect(version.object_key).toBeTruthy();
       expect(version.storage_migration_status).toBe("verified");
     }
+    const detail = await readOk<any>(await owner.get(`/api/documents/${encodeURIComponent(uploaded.id)}`));
+    expectNoStorageLeak(detail);
+    expect(detail.versions).toHaveLength(2);
     const replacedDownload = await owner.get(`/api/documents/${encodeURIComponent(uploaded.id)}/download`);
     expect(replacedDownload.status(), await replacedDownload.text()).toBe(200);
     expect(await replacedDownload.text()).toBe(replacementMarker);
@@ -258,6 +257,11 @@ test.describe.serial("Phase 5 document storage foundation", () => {
     ]);
     expect(verifyMissing.code).not.toBe(0);
     expect(verifyMissing.stdout).toContain('"missingObjectFiles"');
+    const verifyMissingOutput = `${verifyMissing.stdout}\n${verifyMissing.stderr}`;
+    for (const privateIdentifier of [fallback.id, fallbackRow.storage_key, fallbackRow.object_key]) {
+      expect(verifyMissingOutput).not.toContain(String(privateIdentifier));
+    }
+    expect(verifyMissing.stderr).toMatch(/documents:ref=[0-9a-f]{12}/);
     expect(objectRow.object_key).toBeTruthy();
 
     await disposeContexts(owner);
@@ -317,9 +321,27 @@ test.describe.serial("Phase 5 document storage foundation", () => {
     expect(row.storage_migration_status).toBe("verified");
     await expect.poll(() => exists(objectPath(row.object_key))).toBe(true);
 
-    const verify = await runScript("scripts/verify-document-storage.ts", [`--document-id=${uploaded.id}`]);
+    const selectedCount = await dbQuery(
+      `SELECT (
+         (SELECT COUNT(*) FROM documents WHERE id = $1) +
+         (SELECT COUNT(*) FROM document_versions WHERE document_id = $1)
+       )::int AS count`,
+      [uploaded.id]
+    );
+    expect(Number(selectedCount.rows[0]?.count || 0)).toBeGreaterThan(1);
+
+    const verify = await runScript("scripts/verify-document-storage.ts", [
+      "--batch-size=1",
+      `--document-id=${uploaded.id}`,
+    ]);
     expect(verify.code, verify.stderr).toBe(0);
     expect(verify.stdout).toContain('"objectVerified"');
+    const verifySummary = JSON.parse(verify.stdout.slice(verify.stdout.indexOf("{")));
+    expect(verifySummary.scanned).toBe(Number(selectedCount.rows[0].count));
+    const verifyOutput = `${verify.stdout}\n${verify.stderr}`;
+    for (const privateIdentifier of [uploaded.id, row.storage_key, row.object_key]) {
+      expect(verifyOutput).not.toContain(String(privateIdentifier));
+    }
 
     await disposeContexts(owner);
   });

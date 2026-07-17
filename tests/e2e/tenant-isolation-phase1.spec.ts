@@ -25,7 +25,7 @@ async function createTenantOwner(owner: Awaited<ReturnType<typeof loginApi>>) {
       },
     })
   );
-  return { tenantEmail, companyName, organizationId: data.organizationId };
+  return { tenantEmail, companyName, organizationId: data.organizationId, ownerUserId: data.ownerUserId };
 }
 
 test.describe.serial("phase 1 tenant isolation hardening", () => {
@@ -90,6 +90,21 @@ test.describe.serial("phase 1 tenant isolation hardening", () => {
     await expectForbidden(spoofedDocuments);
     const spoofedDocumentsPayload = await spoofedDocuments.json();
     expect(spoofedDocumentsPayload.error?.code).toBe("TENANT_SCOPE_CONFLICT");
+
+    const spoofedRecords = await tenant.put(`/api/users/${encodeURIComponent(tenantInfo.ownerUserId)}/records`, {
+      data: {
+        organizationId: spoofedOwnerOrgId,
+        records: { commercialCards: [] },
+      },
+    });
+    await expectForbidden(spoofedRecords);
+    const spoofedRecordsPayload = await spoofedRecords.json();
+    expect(spoofedRecordsPayload.error?.code).toBe("TENANT_SCOPE_CONFLICT");
+
+    const crossTenantRecords = await tenant.put("/api/users/u1/records", {
+      data: { records: { commercialCards: [] } },
+    });
+    await expectForbidden(crossTenantRecords);
 
     const adminOrg = await readOk<any>(
       await owner.get(`/api/admin/organizations/${encodeURIComponent(tenantInfo.organizationId)}`)

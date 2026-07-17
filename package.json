@@ -43,7 +43,7 @@
     "audit:dead": "knip --production",
     "audit:deps": "depcheck",
     "deploy": "liara deploy",
-    "deploy:staging": "liara deploy --liara-json liara.staging.json --app logisticplus-staging --port 3000 --disks logisticplus-documents-staging:storage/documents"
+    "deploy:staging": "liara deploy --liara-json liara.staging.json --app logisticplus-staging --port 3000 --no-app-logs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1058.0",

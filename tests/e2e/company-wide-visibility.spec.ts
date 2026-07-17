@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import pg from "pg";
 import {
   USER_PASSWORD,
+  assertTestDatabaseUrl,
   disposeContexts,
   expectForbidden,
   expectUnavailable,
@@ -99,8 +100,76 @@ async function bootstrap(context: Awaited<ReturnType<typeof loginApi>>, userId: 
   return response.json();
 }
 
+async function ignoredCompatibilitySnapshot(
+  client: DbClient,
+  {
+    organizationId,
+    userId,
+    quotationId,
+    notificationId,
+    channelId,
+    messageId,
+  }: {
+    organizationId: string;
+    userId: string;
+    quotationId: string;
+    notificationId: string;
+    channelId: string;
+    messageId: string;
+  }
+) {
+  const result = await client.query(
+    `SELECT jsonb_build_object(
+       'customer', (
+         SELECT to_jsonb(customer_row)
+         FROM customers customer_row
+         WHERE customer_row.organization_id = $1 AND customer_row.id = 'c1'
+       ),
+       'quotation', (
+         SELECT to_jsonb(quotation_row)
+         FROM quotations quotation_row
+         WHERE quotation_row.organization_id = $1 AND quotation_row.id = $3
+       ),
+       'notification', (
+         SELECT to_jsonb(notification_row)
+         FROM notifications notification_row
+         WHERE notification_row.organization_id = $1 AND notification_row.id = $4
+       ),
+       'channel', (
+         SELECT to_jsonb(channel_row)
+         FROM chat_threads channel_row
+         WHERE channel_row.organization_id = $1 AND channel_row.id = $5
+       ),
+       'message', (
+         SELECT to_jsonb(message_row)
+         FROM chat_messages message_row
+         WHERE message_row.organization_id = $1 AND message_row.id = $6
+       ),
+       'compatibilityRows', COALESCE((
+         SELECT jsonb_agg(to_jsonb(record_row) ORDER BY record_row.collection, record_row.item_id)
+         FROM user_records record_row
+         WHERE record_row.owner_user_id = $2
+           AND record_row.collection = ANY($7::text[])
+           AND record_row.item_id = ANY($8::text[])
+       ), '[]'::jsonb)
+     ) AS snapshot`,
+    [
+      organizationId,
+      userId,
+      quotationId,
+      notificationId,
+      channelId,
+      messageId,
+      ["customers", "notifications", "channels", "messages", "quotes"],
+      ["c1", quotationId, notificationId, channelId, messageId],
+    ]
+  );
+  return result.rows[0].snapshot;
+}
+
 test.describe.serial("company-wide operational data sharing", () => {
   test.beforeAll(async () => {
+    assertTestDatabaseUrl();
     client = new Client({ connectionString: testDatabaseUrl });
     await client.connect();
   });
@@ -217,6 +286,34 @@ test.describe.serial("company-wide operational data sharing", () => {
       );
       const operationQuotes = await readOk<any[]>(await operations.get("/api/quotations?includeArchived=true"));
       expect(operationQuotes.some((item) => item.id === quote.id)).toBe(true);
+
+      const organization = await client.query("SELECT organization_id FROM app_users WHERE id = $1", [employeeUser.id]);
+      const organizationId = organization.rows[0]?.organization_id;
+      expect(organizationId).toBeTruthy();
+      const ignoredMarker = `e2e-ignored-compatibility-${Date.now()}`;
+      const ignoredIds = {
+        organizationId,
+        userId: employeeUser.id,
+        quotationId: quote.id,
+        notificationId: `${ignoredMarker}-notification`,
+        channelId: `${ignoredMarker}-channel`,
+        messageId: `${ignoredMarker}-message`,
+      };
+      const beforeIgnoredSave = await ignoredCompatibilitySnapshot(client, ignoredIds);
+      const ignoredSave = await employee.put(`/api/users/${employeeUser.id}/records`, {
+        data: {
+          records: {
+            customers: [{ id: "c1", name: "MUST NOT REPLACE CUSTOMER", phone: "00000000000" }],
+            notifications: [{ id: ignoredIds.notificationId, title: "MUST NOT CREATE NOTIFICATION" }],
+            channels: [{ id: ignoredIds.channelId, name: "MUST NOT CREATE CHANNEL" }],
+            messages: [{ id: ignoredIds.messageId, channelId: ignoredIds.channelId, content: "MUST NOT CREATE MESSAGE" }],
+            quotes: [{ id: quote.id, customerName: "MUST NOT REPLACE QUOTATION", totalPrice: 1 }],
+          },
+        },
+      });
+      expect(ignoredSave.status(), await ignoredSave.text()).toBeLessThan(400);
+      expect((await ignoredSave.json()).total).toBe(0);
+      expect(await ignoredCompatibilitySnapshot(client, ignoredIds)).toEqual(beforeIgnoredSave);
 
       const meeting = await readOk<any>(
         await manager.post("/api/compliance-meetings", {
