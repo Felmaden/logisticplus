@@ -59,6 +59,21 @@ async function resetDocumentStorage() {
   await fs.mkdir(resolved, { recursive: true });
 }
 
+async function raisePlaywrightUserLimit() {
+  const client = new Client({ connectionString: testDatabaseUrl });
+  await client.connect();
+  try {
+    await client.query(`
+      UPDATE organization_subscriptions os
+      SET limits_override = jsonb_set(os.limits_override, '{users}', '500'::jsonb, true)
+      FROM app_users u
+      WHERE u.id = 'u1' AND os.organization_id = u.organization_id
+    `);
+  } finally {
+    await client.end();
+  }
+}
+
 function runTsxScript(scriptPath: string) {
   const env = {
     ...process.env,
@@ -92,6 +107,7 @@ async function main() {
   await resetDatabase();
   await runTsxScript("scripts/seed-db.ts");
   await runTsxScript("scripts/bridge-canonical-db.ts");
+  await raisePlaywrightUserLimit();
   console.log(`Reset Playwright test database: ${getDatabaseName(testDatabaseUrl)}`);
 }
 

@@ -32,6 +32,7 @@ import { parseRequestValue } from "./shared/middleware/validate.middleware.js";
 import {
   addChatThreadMember,
   assignTaskRecord,
+  archiveChatThread,
   archiveDocumentRecord,
   archiveChequeRecord,
   archiveComplianceMeetingRecord,
@@ -1624,6 +1625,37 @@ async function startServer() {
       res.status(201).json({ ok: true, data: { id } });
     } catch (error) {
       handleChatRouteError(res, error, "CHAT_THREAD_CREATE_FAILED", "Could not create chat thread.");
+    }
+  });
+
+  app.delete("/api/chat/threads/:id", async (req, res) => {
+    try {
+      const tenantRequest = await requireChatTenantUser(req, res, "chat group archive API", "chat.manage_groups");
+      if (!tenantRequest) return;
+      if (!(await consumeRateLimit(req, res, "chat_participant_change", { ...CHAT_PARTICIPANT_CHANGE_LIMIT, discriminator: tenantRequest.user.id }))) return;
+      const params = parseRequestValue(res, chatThreadParamsSchema, req.params);
+      if (!params) return;
+      const archived = await archiveChatThread(params.id, {
+        organizationId: tenantRequest.organizationId,
+        actorUserId: tenantRequest.user.id,
+      });
+      await auditLog({
+        actorUserId: tenantRequest.user.id,
+        organizationId: tenantRequest.organizationId,
+        action: "chat.thread_archive",
+        entityType: "chat_thread",
+        entityId: params.id,
+        summary: "Chat group was archived.",
+        after: { archivedAt: archived.archivedAt },
+        requestContext: requestContext(req),
+      });
+      broadcastChat(
+        { type: "thread.updated", payload: { threadId: params.id, archivedAt: archived.archivedAt } },
+        { organizationId: tenantRequest.organizationId, userIds: archived.memberIds }
+      );
+      res.json({ ok: true, data: { id: archived.id, archivedAt: archived.archivedAt } });
+    } catch (error) {
+      handleChatRouteError(res, error, "CHAT_THREAD_ARCHIVE_FAILED", "Could not remove chat group.");
     }
   });
 

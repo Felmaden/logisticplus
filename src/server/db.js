@@ -6429,6 +6429,9 @@ function toUiChatAttachment(row) {
   if (!row) return null;
   const deletedAt = row.deleted_at || null;
   const baseUrl = `/api/chat/messages/${encodeURIComponent(row.message_id)}/attachments/${encodeURIComponent(row.id)}`;
+  const attachmentType = ["image", "audio"].includes(row.attachment_type) ? row.attachment_type : "document";
+  const normalizedContentType = String(row.content_type || "").split(";")[0].trim().toLowerCase();
+  const canPreview = attachmentType === "image" || attachmentType === "audio" || normalizedContentType === "application/pdf";
   return {
     id: row.id,
     messageId: row.message_id,
@@ -6437,13 +6440,13 @@ function toUiChatAttachment(row) {
     contentType: row.content_type || "application/octet-stream",
     sizeBytes: Number(row.size_bytes || 0),
     fileSize: formatAttachmentSize(row.size_bytes),
-    attachmentType: row.attachment_type === "image" ? "image" : "document",
+    attachmentType,
     createdAt: row.created_at,
     deletedAt,
     deletedReason: row.deleted_reason || null,
     ...(deletedAt ? {} : {
       downloadUrl: `${baseUrl}/download`,
-      ...(row.attachment_type === "image" ? { previewUrl: `${baseUrl}/preview` } : {}),
+      ...(canPreview ? { previewUrl: `${baseUrl}/preview` } : {}),
     }),
   };
 }
@@ -6933,6 +6936,58 @@ export async function createChatThread({ actorUserId, organizationId, type = "GR
   }
 }
 
+export async function archiveChatThread(threadId, { organizationId, actorUserId } = {}) {
+  const scopedOrganizationId = requireOrganizationScope(organizationId, "archiveChatThread");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const thread = await assertChatParticipant(client, {
+      threadId,
+      userId: actorUserId,
+      organizationId: scopedOrganizationId,
+      lock: true,
+    });
+    if (thread.type !== "GROUP") {
+      throw chatAccessError("Only group chats can be removed.", 400, "CHAT_THREAD_ARCHIVE_UNSUPPORTED");
+    }
+    const members = await client.query(
+      `SELECT user_id
+       FROM chat_thread_members
+       WHERE thread_id = $1
+         AND organization_id = $2
+         AND status = 'active'`,
+      [threadId, scopedOrganizationId]
+    );
+    const archived = await client.query(
+      `UPDATE chat_threads
+       SET archived_at = NOW(), updated_at = NOW()
+       WHERE id = $1
+         AND organization_id = $2
+         AND archived_at IS NULL
+       RETURNING id, archived_at`,
+      [threadId, scopedOrganizationId]
+    );
+    await insertChatEvent(client, {
+      organizationId: scopedOrganizationId,
+      threadId,
+      actorUserId,
+      eventType: "thread.archive",
+      metadata: { type: "GROUP" },
+    });
+    await client.query("COMMIT");
+    return {
+      id: archived.rows[0].id,
+      archivedAt: archived.rows[0].archived_at,
+      memberIds: members.rows.map((row) => row.user_id),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function userCanAccessThread(userId, threadId, { organizationId } = {}) {
   const values = [userId, threadId];
   const organizationClause = organizationId ? `AND m.organization_id = $${values.push(organizationId)} AND t.organization_id = $${values.length}` : "";
@@ -7073,7 +7128,9 @@ export async function createChatAttachmentMessage({
   if (!attachment) {
     throw chatAccessError("Attachment is required.", 400, "CHAT_ATTACHMENT_REQUIRED");
   }
-  const fallbackBody = attachment.originalFileName || attachment.sanitizedName || "Attachment";
+  const fallbackBody = attachment.attachmentType === "audio"
+    ? "پیام صوتی"
+    : attachment.originalFileName || attachment.sanitizedName || "Attachment";
   const messageBody = normalizeChatMessageBody(caption || fallbackBody);
   const client = await pool.connect();
   try {
@@ -7140,7 +7197,7 @@ export async function createChatAttachmentMessage({
         attachment.sanitizedName || attachment.originalFileName || null,
         attachment.contentType || attachment.mimeType || "application/octet-stream",
         Number(attachment.sizeBytes || 0),
-        attachment.attachmentType === "image" ? "image" : "document",
+        ["image", "audio"].includes(attachment.attachmentType) ? attachment.attachmentType : "document",
       ]
     );
     await client.query(
@@ -7398,8 +7455,12 @@ export async function getChatAttachmentForDelivery(messageId, attachmentId, user
   if (attachment.deleted_at) {
     throw chatAccessError("Attachment was deleted.", 404, "CHAT_ATTACHMENT_DELETED");
   }
-  if (previewOnly && attachment.attachment_type !== "image") {
-    throw chatAccessError("Attachment preview is available for images only.", 415, "CHAT_ATTACHMENT_PREVIEW_UNSUPPORTED");
+  const normalizedContentType = String(attachment.content_type || "").split(";")[0].trim().toLowerCase();
+  const previewable = attachment.attachment_type === "image"
+    || attachment.attachment_type === "audio"
+    || normalizedContentType === "application/pdf";
+  if (previewOnly && !previewable) {
+    throw chatAccessError("Attachment preview is not available for this file type.", 415, "CHAT_ATTACHMENT_PREVIEW_UNSUPPORTED");
   }
   return attachment;
 }

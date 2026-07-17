@@ -368,6 +368,7 @@ test.describe.serial("document download, public access, archive, and print/expor
         }
       )
     );
+    await readOk<any>(await owner.post("/api/shipments/s1/v2-profile/init"));
 
     const quote = await readOk<any>(
       await owner.post("/api/quotations", {
@@ -439,6 +440,7 @@ test.describe.serial("document download, public access, archive, and print/expor
     const employeeApi = await loginApi(employee.email, USER_PASSWORD);
     const documentTitle = `E2E Protected Document ${Date.now()}`;
     const chatFileName = `chat-media-library-${Date.now()}.txt`;
+    const chatAudioName = `chat-media-library-${Date.now()}.webm`;
 
     const uploadedDocument = await readOk<any>(
       await uploadDocument(
@@ -471,6 +473,19 @@ test.describe.serial("document download, public access, archive, and print/expor
     );
     const attachment = chatMessage.attachments?.[0];
     expect(attachment?.downloadUrl).toBeTruthy();
+    const audioMessage = await readOk<any>(
+      await uploadChatAttachment(
+        owner,
+        thread.id,
+        {
+          name: chatAudioName,
+          mimeType: "audio/webm;codecs=opus",
+          buffer: Buffer.from("internal voice message"),
+        },
+        "CEO audio media library smoke"
+      )
+    );
+    expect(audioMessage.attachments?.[0]?.attachmentType).toBe("audio");
 
     const ownerContext = await browser.newContext();
     const ownerPage = await ownerContext.newPage();
@@ -484,6 +499,12 @@ test.describe.serial("document download, public access, archive, and print/expor
       await ownerPage.getByTestId("chat-media-tab").click();
       await expect(ownerPage.getByTestId("chat-media-library")).toBeVisible();
       await expect(ownerPage.getByTestId("chat-media-item").filter({ hasText: chatFileName })).toBeVisible();
+      await ownerPage.getByRole("button", { name: "پیام‌های صوتی" }).click();
+      const audioItem = ownerPage.getByTestId("chat-media-item").filter({ hasText: chatAudioName });
+      await expect(audioItem).toBeVisible();
+      await expect(audioItem.getByTestId("chat-media-audio")).toBeVisible();
+      await expect(ownerPage.getByTestId("chat-media-item").filter({ hasText: chatFileName })).toHaveCount(0);
+      await ownerPage.getByRole("button", { name: "همه" }).click();
 
       await loginViaUi(employeePage, employee.email, USER_PASSWORD);
       await employeePage.goto("/documents");

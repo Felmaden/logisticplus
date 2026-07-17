@@ -174,7 +174,147 @@ test.describe.serial("secure company chat", () => {
     }
   });
 
-  test("stores chat attachments privately with member-only delivery and safe deletion", async () => {
+  test("lets active group managers add same-company users and safely archive groups", async ({ browser, page }) => {
+    const owner = await loginApi();
+    const manager = await createCompanyUser(owner, "MANAGER", "e2e-chat-group-manager");
+    const employee = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-group-member");
+    const outsider = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-group-outsider");
+    const inactive = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-group-inactive");
+    const tenantInfo = await createTenantOwner(owner);
+    const managerApi = await loginApi(manager.email, USER_PASSWORD);
+    const employeeApi = await loginApi(employee.email, USER_PASSWORD);
+    const outsiderApi = await loginApi(outsider.email, USER_PASSWORD);
+    const tenant = await loginApi(tenantInfo.tenantEmail, USER_PASSWORD);
+    const employeeContext = await browser.newContext();
+    const employeePage = await employeeContext.newPage();
+
+    try {
+      await readOk<any>(await owner.patch(`/api/users/${encodeURIComponent(inactive.id)}`, {
+        data: { status: "suspended" },
+      }));
+      const group = await readOk<{ id: string }>(await owner.post("/api/chat/threads", {
+        data: {
+          type: "GROUP",
+          name: `E2E managed group ${Date.now()}`,
+          participantUserIds: [manager.id],
+        },
+      }));
+      threadIds.add(group.id);
+      const preservedMessage = await readOk<any>(await owner.post(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/messages`,
+        { data: { body: "history must remain after archival" } }
+      ));
+      const preservedFileMessage = await readOk<any>(await uploadChatAttachment(
+        owner,
+        group.id,
+        { name: "archive-history.png", mimeType: "image/png", buffer: tinyPng },
+        "preserved attachment"
+      ));
+      const preservedAttachment = preservedFileMessage.attachments?.[0];
+
+      await loginViaUi(page, manager.email, USER_PASSWORD);
+      await page.goto(`/chat?threadId=${encodeURIComponent(group.id)}`);
+      await expect(page.getByTestId("chat-group-settings-button")).toBeVisible();
+      await page.getByTestId("chat-group-settings-button").click();
+      await expect(page.getByTestId("chat-group-member-list")).toContainText(manager.name);
+      await page.getByTestId("chat-group-member-search").fill(employee.email);
+      await expect(page.getByTestId("chat-group-available-users")).toContainText(employee.email);
+      await page.getByTestId("chat-group-add-member").click();
+      await expect(page.getByTestId("chat-group-member-list")).toContainText(employee.name);
+
+      const employeeThreads = await readOk<any[]>(await employeeApi.get("/api/chat/threads"));
+      expect(employeeThreads.some((thread) => thread.id === group.id)).toBe(true);
+      const employeeMessages = await readOk<any[]>(
+        await employeeApi.get(`/api/chat/threads/${encodeURIComponent(group.id)}/messages`)
+      );
+      expect(employeeMessages.some((message) => message.id === preservedMessage.id)).toBe(true);
+      const duplicateAdd = await managerApi.post(`/api/chat/threads/${encodeURIComponent(group.id)}/participants`, {
+        data: { userId: employee.id },
+      });
+      expect(duplicateAdd.status(), await duplicateAdd.text()).toBe(200);
+      const membershipRows = await client.query(
+        "SELECT COUNT(*)::int AS count FROM chat_thread_members WHERE thread_id = $1 AND user_id = $2",
+        [group.id, employee.id]
+      );
+      expect(membershipRows.rows[0]?.count).toBe(1);
+
+      const inactiveAdd = await managerApi.post(`/api/chat/threads/${encodeURIComponent(group.id)}/participants`, {
+        data: { userId: inactive.id },
+      });
+      expect(inactiveAdd.status()).toBe(403);
+      const crossTenantAdd = await managerApi.post(`/api/chat/threads/${encodeURIComponent(group.id)}/participants`, {
+        data: { userId: tenantInfo.ownerUserId },
+      });
+      expect(crossTenantAdd.status()).toBe(403);
+
+      const direct = await readOk<{ id: string }>(await managerApi.post("/api/chat/direct", {
+        data: { userId: employee.id },
+      }));
+      threadIds.add(direct.id);
+      const directAdd = await managerApi.post(`/api/chat/threads/${encodeURIComponent(direct.id)}/participants`, {
+        data: { userId: outsider.id },
+      });
+      expect(directAdd.status()).toBe(400);
+      const directArchive = await managerApi.delete(`/api/chat/threads/${encodeURIComponent(direct.id)}`);
+      expect(directArchive.status()).toBe(400);
+
+      const shipment = await readOk<any>(await owner.get("/api/shipments/s1/chat-thread"));
+      threadIds.add(shipment.id);
+      const shipmentArchive = await owner.delete(`/api/chat/threads/${encodeURIComponent(shipment.id)}`);
+      expect(shipmentArchive.status()).toBe(400);
+      expect((await employeeApi.delete(`/api/chat/threads/${encodeURIComponent(group.id)}`)).status()).toBe(403);
+      await expectUnavailable(await outsiderApi.delete(`/api/chat/threads/${encodeURIComponent(group.id)}`));
+      await expectUnavailable(await tenant.delete(`/api/chat/threads/${encodeURIComponent(group.id)}`));
+
+      await loginViaUi(employeePage, employee.email, USER_PASSWORD);
+      await employeePage.goto(`/chat?threadId=${encodeURIComponent(group.id)}`);
+      await expect(employeePage.getByTestId("chat-composer")).toBeVisible();
+      await expect(employeePage.getByTestId("chat-group-settings-button")).toHaveCount(0);
+
+      await page.setViewportSize({ width: 390, height: 844 });
+      const dialogOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(dialogOverflow).toBeLessThanOrEqual(1);
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.getByTestId("chat-group-archive-button").click();
+      await page.getByRole("button", { name: "تایید و بایگانی گروه" }).click();
+      await expect(page).not.toHaveURL(new RegExp(`threadId=${encodeURIComponent(group.id)}`));
+      await expect(page.getByTestId("chat-thread-item").filter({ hasText: "E2E managed group" })).toHaveCount(0);
+
+      const archived = await client.query(
+        `SELECT archived_at,
+                (SELECT COUNT(*)::int FROM chat_messages WHERE thread_id = $1) AS message_count,
+                (SELECT COUNT(*)::int FROM chat_message_attachments WHERE thread_id = $1) AS attachment_count
+         FROM chat_threads
+         WHERE id = $1`,
+        [group.id]
+      );
+      expect(archived.rows[0]?.archived_at).toBeTruthy();
+      expect(archived.rows[0]?.message_count).toBeGreaterThanOrEqual(2);
+      expect(archived.rows[0]?.attachment_count).toBe(1);
+      expect((await readOk<any[]>(await managerApi.get("/api/chat/threads"))).some((thread) => thread.id === group.id)).toBe(false);
+      expect((await readOk<any[]>(await employeeApi.get("/api/chat/threads"))).some((thread) => thread.id === group.id)).toBe(false);
+      await expectUnavailable(await employeeApi.get(`/api/chat/threads/${encodeURIComponent(group.id)}/messages`));
+      await expectUnavailable(await owner.get(preservedAttachment.previewUrl));
+
+      const chatEvents = await client.query(
+        "SELECT event_type FROM chat_message_events WHERE thread_id = $1",
+        [group.id]
+      );
+      expect(chatEvents.rows.map((row) => row.event_type)).toContain("thread.archive");
+      expect(chatEvents.rows.map((row) => row.event_type)).toContain("participant.add");
+      const audit = await client.query(
+        "SELECT event_type FROM audit_logs WHERE resource_type = 'chat_thread' AND resource_id = $1",
+        [group.id]
+      );
+      expect(audit.rows.map((row) => row.event_type)).toContain("chat.thread_archive");
+      expect(preservedMessage.id).toBeTruthy();
+    } finally {
+      await employeeContext.close();
+      await disposeContexts(owner, managerApi, employeeApi, outsiderApi, tenant);
+    }
+  });
+
+  test("stores chat attachments privately with member-only delivery and safe deletion", async ({ page }) => {
     const owner = await loginApi();
     const tenantInfo = await createTenantOwner(owner);
     const employee = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-attach");
@@ -235,6 +375,34 @@ test.describe.serial("secure company chat", () => {
       expect(download.status(), await download.text()).toBe(200);
       expect(await download.text()).toBe("private chat document body");
 
+      const audioMessage = await readOk<any>(await uploadChatAttachment(
+        owner,
+        thread.id,
+        { name: "voice-message.webm", mimeType: "audio/webm;codecs=opus", buffer: Buffer.from("private opus voice") },
+        "voice caption"
+      ));
+      const audioAttachment = audioMessage.attachments?.[0];
+      expect(audioAttachment.attachmentType).toBe("audio");
+      expect(audioAttachment.previewUrl).toContain("/api/chat/messages/");
+      const audioPreview = await employeeApi.get(audioAttachment.previewUrl);
+      expect(audioPreview.status(), await audioPreview.text()).toBe(200);
+      expect(audioPreview.headers()["content-type"]).toContain("audio/webm");
+      expect(audioPreview.headers()["content-disposition"]).toContain("inline");
+      expect(audioPreview.headers()["x-content-type-options"]).toBe("nosniff");
+
+      const unsupportedAudio = await uploadChatAttachment(
+        owner,
+        thread.id,
+        { name: "voice.wav", mimeType: "audio/wav", buffer: Buffer.from("unsupported audio") }
+      );
+      expect(unsupportedAudio.status()).toBe(415);
+      const oversizedAudio = await uploadChatAttachment(
+        owner,
+        thread.id,
+        { name: "too-large.webm", mimeType: "audio/webm", buffer: Buffer.alloc(10 * 1024 * 1024 + 1) }
+      );
+      expect(oversizedAudio.status()).toBe(413);
+
       const unsupported = await owner.post(`/api/chat/threads/${encodeURIComponent(thread.id)}/attachments`, {
         multipart: {
           file: { name: "unsafe.exe", mimeType: "application/octet-stream", buffer: Buffer.from("nope") },
@@ -250,6 +418,15 @@ test.describe.serial("secure company chat", () => {
         },
       });
       expect(oversizedImage.status()).toBe(413);
+
+      await loginViaUi(page, employee.email, USER_PASSWORD);
+      await page.goto(`/chat?threadId=${encodeURIComponent(thread.id)}`);
+      const pageCount = page.context().pages().length;
+      await page.getByTestId("chat-image-attachment").first().locator("button").first().click();
+      await expect(page.getByTestId("chat-attachment-preview-dialog").locator("img")).toBeVisible();
+      expect(page.context().pages().length).toBe(pageCount);
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("chat-audio-attachment").locator("audio")).toBeVisible();
 
       const blockedDelete = await employeeApi.delete(
         `/api/chat/messages/${encodeURIComponent(imageMessage.id)}/attachments/${encodeURIComponent(imageAttachment.id)}`
@@ -316,6 +493,7 @@ test.describe.serial("secure company chat", () => {
       );
       const persianAttachment = persianMessage.attachments?.[0];
       expect(persianAttachment?.filename).toBe(persianName);
+      expect(persianAttachment?.previewUrl).toContain("/preview");
       expect(JSON.stringify(persianMessage).toLowerCase()).not.toContain("storage_key");
       expect(JSON.stringify(persianMessage).toLowerCase()).not.toContain("object_key");
 
@@ -338,10 +516,20 @@ test.describe.serial("secure company chat", () => {
       const persianDisposition = persianDownload.headers()["content-disposition"] || "";
       expect(persianDisposition).toContain('filename="document.pdf"');
       expect(persianDisposition).toContain(`filename*=UTF-8''${encodeURIComponent(persianName)}`);
+      const persianPreview = await owner.get(persianAttachment.previewUrl);
+      expect(persianPreview.status(), await persianPreview.text()).toBe(200);
+      expect(persianPreview.headers()["content-type"]).toContain("application/pdf");
+      expect(persianPreview.headers()["content-disposition"]).toContain("inline");
+      expect(persianPreview.headers()["x-content-type-options"]).toBe("nosniff");
 
-      await loginViaUi(page);
+      await loginViaUi(page, employee.email, USER_PASSWORD);
       await page.goto(`/chat?threadId=${encodeURIComponent(thread.id)}`);
       await expect(page.getByTestId("chat-file-attachment").filter({ hasText: persianName })).toBeVisible();
+      const pageCount = page.context().pages().length;
+      await page.getByTestId("chat-file-attachment").filter({ hasText: persianName }).getByLabel("Preview attachment").click();
+      await expect(page.getByTestId("chat-pdf-preview")).toBeVisible();
+      expect(page.context().pages().length).toBe(pageCount);
+      await page.keyboard.press("Escape");
 
       const englishName = "contract-ms.pdf";
       const englishMessage = await readOk<any>(
@@ -383,6 +571,126 @@ test.describe.serial("secure company chat", () => {
       expect(unsafeName).toContain("قراردادمس.pdf");
       expect(unsafeName.endsWith(".pdf")).toBe(true);
       expect(Array.from(unsafeName).length).toBeLessThanOrEqual(140);
+    } finally {
+      await disposeContexts(owner);
+    }
+  });
+
+  test("records, cancels, auto-stops, previews, and explicitly sends voice messages", async ({ page }) => {
+    const owner = await loginApi();
+    const employee = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-voice");
+    const thread = await readOk<{ id: string }>(
+      await owner.post("/api/chat/direct", { data: { userId: employee.id } })
+    );
+    threadIds.add(thread.id);
+
+    await page.addInitScript(() => {
+      const state = {
+        trackStops: 0,
+        revokedUrls: [] as string[],
+      };
+      (window as any).__chatVoiceTestState = state;
+      const track = { stop: () => { state.trackStops += 1; } };
+      Object.defineProperty(navigator, "mediaDevices", {
+        configurable: true,
+        value: {
+          getUserMedia: async () => ({ getTracks: () => [track] }),
+        },
+      });
+
+      class FakeMediaRecorder {
+        static isTypeSupported(type: string) {
+          return type.startsWith("audio/webm");
+        }
+
+        state: "inactive" | "recording" = "inactive";
+        mimeType: string;
+        ondataavailable: ((event: { data: Blob }) => void) | null = null;
+        onstop: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+
+        constructor(_stream: unknown, options?: { mimeType?: string }) {
+          this.mimeType = options?.mimeType || "audio/webm";
+        }
+
+        start() {
+          this.state = "recording";
+        }
+
+        stop() {
+          if (this.state === "inactive") return;
+          this.state = "inactive";
+          this.ondataavailable?.({ data: new Blob(["fake opus voice"], { type: this.mimeType }) });
+          this.onstop?.();
+        }
+      }
+
+      Object.defineProperty(window, "MediaRecorder", { configurable: true, value: FakeMediaRecorder });
+      const revokeObjectUrl = URL.revokeObjectURL.bind(URL);
+      URL.revokeObjectURL = (url: string) => {
+        state.revokedUrls.push(url);
+        revokeObjectUrl(url);
+      };
+    });
+
+    try {
+      await loginViaUi(page, employee.email, USER_PASSWORD);
+      await page.goto(`/chat?threadId=${encodeURIComponent(thread.id)}`);
+      await page.clock.install();
+
+      await page.getByTestId("chat-voice-button").click();
+      await expect(page.getByTestId("chat-voice-recording")).toBeVisible();
+      await page.clock.fastForward(2250);
+      await expect(page.getByTestId("chat-voice-timer")).toContainText("00:02");
+      await page.getByTestId("chat-voice-stop").click();
+      await expect(page.getByTestId("chat-voice-preview")).toBeVisible();
+      await page.getByTestId("chat-message-input").fill("voice message caption");
+      await page.getByTestId("chat-send-button").click();
+      await expect(page.getByTestId("chat-audio-attachment").locator("audio")).toBeVisible();
+      await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.revokedUrls.length)).toBeGreaterThan(0);
+      await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.trackStops)).toBe(1);
+
+      const messages = await readOk<any[]>(await owner.get(`/api/chat/threads/${encodeURIComponent(thread.id)}/messages`));
+      const voiceMessage = messages.find((message) => message.body === "voice message caption");
+      expect(voiceMessage?.attachments?.[0]?.attachmentType).toBe("audio");
+      expect(voiceMessage?.attachments?.[0]?.previewUrl).toContain("/preview");
+
+      await page.getByTestId("chat-voice-button").click();
+      await page.getByTestId("chat-voice-cancel").click();
+      await expect(page.getByTestId("chat-voice-recording")).toHaveCount(0);
+      await expect(page.getByTestId("chat-selected-attachment")).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.trackStops)).toBe(2);
+
+      await page.getByTestId("chat-voice-button").click();
+      await page.clock.fastForward(300_500);
+      await expect(page.getByTestId("chat-voice-recording")).toHaveCount(0);
+      await expect(page.getByTestId("chat-voice-preview")).toBeVisible();
+      await expect(page.getByTestId("chat-selected-attachment")).toContainText("05:00");
+      await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.trackStops)).toBe(3);
+      const revokedBeforeThreadChange = await page.evaluate(() => (window as any).__chatVoiceTestState.revokedUrls.length);
+      await page.getByTestId("chat-category-group").click();
+      await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.revokedUrls.length)).toBeGreaterThan(revokedBeforeThreadChange);
+      await page.getByTestId("chat-category-dm").click();
+      await page.getByTestId("chat-thread-item").first().click();
+
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "mediaDevices", {
+          configurable: true,
+          value: {
+            getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+          },
+        });
+      });
+      await page.getByTestId("chat-voice-button").click();
+      await expect(page.getByTestId("chat-error")).toContainText("دسترسی میکروفن");
+      await expect(page.getByTestId("chat-message-input")).toBeEnabled();
+
+      await page.evaluate(() => {
+        Object.defineProperty(window, "MediaRecorder", { configurable: true, value: undefined });
+      });
+      await page.getByTestId("chat-voice-button").click();
+      await expect(page.getByTestId("chat-error")).toContainText("پشتیبانی نمی‌کند");
+      await expect(page.getByTestId("chat-message-input")).toBeEnabled();
     } finally {
       await disposeContexts(owner);
     }

@@ -16,6 +16,7 @@ import {
   Image as ImageIcon,
   Loader2,
   MessageSquare,
+  Mic,
   Trash2
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,7 +50,7 @@ type ChatMediaAttachment = {
   contentType: string;
   sizeBytes: number;
   fileSize: string;
-  attachmentType: "image" | "document";
+  attachmentType: "image" | "document" | "audio";
   createdAt: string;
   deletedAt?: string | null;
   deletedReason?: string | null;
@@ -80,7 +81,7 @@ export default function Documents() {
   const [activeSection, setActiveSection] = useState<"documents" | "chatMedia">("documents");
   const [searchTerm, setSearchTerm] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>(DOCUMENT_TYPE_ALL);
-  const [chatMediaTypeFilter, setChatMediaTypeFilter] = useState<"ALL" | "image" | "document">("ALL");
+  const [chatMediaTypeFilter, setChatMediaTypeFilter] = useState<"ALL" | "image" | "document" | "audio">("ALL");
   const [chatMedia, setChatMedia] = useState<ChatMediaAttachment[]>([]);
   const [isChatMediaLoading, setIsChatMediaLoading] = useState(false);
   const [chatMediaError, setChatMediaError] = useState("");
@@ -577,6 +578,7 @@ export default function Documents() {
                 { value: "ALL", label: "همه" },
                 { value: "image", label: "تصاویر" },
                 { value: "document", label: "فایل‌ها" },
+                { value: "audio", label: "پیام‌های صوتی" },
               ].map(filter => (
                 <Button
                   key={filter.value}
@@ -632,13 +634,13 @@ export default function Documents() {
                         </a>
                       ) : (
                         <span className="grid h-16 w-16 shrink-0 place-items-center rounded-lg bg-muted text-primary">
-                          {item.attachmentType === "image" ? <ImageIcon className="h-6 w-6" /> : <FileIcon className="h-6 w-6" />}
+                          {item.attachmentType === "image" ? <ImageIcon className="h-6 w-6" /> : item.attachmentType === "audio" ? <Mic className="h-6 w-6" /> : <FileIcon className="h-6 w-6" />}
                         </span>
                       )}
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge variant="outline" className="rounded-md text-[10px]">
-                            {item.attachmentType === "image" ? "تصویر" : "فایل"}
+                            {item.attachmentType === "image" ? "تصویر" : item.attachmentType === "audio" ? "پیام صوتی" : "فایل"}
                           </Badge>
                           <Badge variant="secondary" className="rounded-md text-[10px]">
                             {getChatThreadTypeLabel(item.threadType)}
@@ -659,9 +661,18 @@ export default function Documents() {
                         <p className="mt-1 text-[10px] font-bold text-muted-foreground">{formatChatMediaDate(item.createdAt)}</p>
                       </div>
                     </div>
+                    {item.attachmentType === "audio" && item.previewUrl && !isDeleted && (
+                      <audio
+                        controls
+                        preload="metadata"
+                        src={item.previewUrl}
+                        className="mt-3 h-10 w-full max-w-full"
+                        data-testid="chat-media-audio"
+                      />
+                    )}
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-3">
                       <div className="flex items-center gap-1">
-                        {item.previewUrl && !isDeleted && (
+                        {item.previewUrl && item.attachmentType !== "audio" && !isDeleted && (
                           <Button asChild variant="ghost" size="icon" className="h-8 w-8 rounded-lg">
                             <a href={item.previewUrl} target="_blank" rel="noreferrer" aria-label="Preview chat media">
                               <Eye className="h-4 w-4" />

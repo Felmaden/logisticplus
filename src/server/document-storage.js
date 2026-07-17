@@ -28,6 +28,7 @@ const DOCUMENT_STORAGE_DIR =
 const DOCUMENT_STORAGE_ROOT = documentLocalStorageInfo().root;
 const DOCUMENT_MAX_BYTES = Number(process.env.DOCUMENT_MAX_BYTES || 25 * 1024 * 1024);
 const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const CHAT_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
 const CHAT_FILE_MAX_BYTES = 15 * 1024 * 1024;
 
 const upload = multer({
@@ -96,6 +97,12 @@ const chatFileAllowlist = new Map([
   [".xlsx", new Set(["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"])],
   [".txt", new Set(["text/plain"])],
   [".csv", new Set(["text/csv", "application/csv", "text/plain", "application/vnd.ms-excel"])],
+]);
+
+const chatAudioAllowlist = new Map([
+  [".webm", new Set(["audio/webm"])],
+  [".ogg", new Set(["audio/ogg"])],
+  [".m4a", new Set(["audio/mp4"])],
 ]);
 
 const blockedDocumentExtensions = new Set([
@@ -351,11 +358,12 @@ function validateChatAttachmentFile(file, displayFileName = file?.originalname |
     return chatAttachmentValidationError("EMPTY_FILE", "File must not be empty.", 400);
   }
   const ext = path.extname(displayFileName || file.originalname || "").toLowerCase();
-  const mime = String(file.mimetype || "").toLowerCase();
+  const mime = normalizeMimeType(file.mimetype);
   const imageMimes = chatImageAllowlist.get(ext);
   const fileMimes = chatFileAllowlist.get(ext);
-  const attachmentType = imageMimes ? "image" : fileMimes ? "document" : "";
-  const allowedMimes = imageMimes || fileMimes;
+  const audioMimes = chatAudioAllowlist.get(ext);
+  const attachmentType = imageMimes ? "image" : audioMimes ? "audio" : fileMimes ? "document" : "";
+  const allowedMimes = imageMimes || audioMimes || fileMimes;
 
   if (blockedDocumentExtensions.has(ext) || !allowedMimes) {
     return chatAttachmentValidationError(
@@ -373,6 +381,13 @@ function validateChatAttachmentFile(file, displayFileName = file?.originalname |
     return chatAttachmentValidationError(
       "FILE_TOO_LARGE",
       "حجم فایل بیش از حد مجاز است",
+      413
+    );
+  }
+  if (attachmentType === "audio" && Number(file.size || 0) > CHAT_AUDIO_MAX_BYTES) {
+    return chatAttachmentValidationError(
+      "FILE_TOO_LARGE",
+      "حجم پیام صوتی بیش از حد مجاز است",
       413
     );
   }

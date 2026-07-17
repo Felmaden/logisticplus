@@ -532,7 +532,7 @@ export const chatAttachmentUploadBodySchema = z.object({
 
 export const chatMediaListQuerySchema = z.object({
   q: z.preprocess(firstQueryValue, optionalTrimmedText(160)),
-  type: optionalQueryEnum(["image", "document"]),
+  type: optionalQueryEnum(["image", "document", "audio"]),
   includeDeleted: queryBoolean(false),
   limit: queryLimit(100),
 }).strict();
