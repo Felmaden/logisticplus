@@ -1,12 +1,12 @@
 import { expect, request as requestFactory, test } from "@playwright/test";
 import crypto from "node:crypto";
-import pg from "pg";
 import {
   BASE_URL,
   OWNER_EMAIL,
   OWNER_PASSWORD,
   USER_PASSWORD,
   apiContext,
+  dbQuery,
   disposeContexts,
   expectForbidden,
   expectPublicTrackingPayloadIsSafe,
@@ -14,32 +14,11 @@ import {
   loginApi,
   loginViaUi,
   readOk,
+  resetRateLimitBuckets,
+  uploadDocument,
   uniqueEmail,
 } from "./helpers";
 import { NORMAL_APP_ROUTE_FAMILIES, RBAC_TENANT_POLICY } from "./rbac-policy";
-
-const { Client } = pg;
-const testDatabaseUrl = process.env.TEST_DATABASE_URL || "postgres://postgres@localhost:5432/logisticplus_test";
-
-async function resetRateLimitBuckets() {
-  const client = new Client({ connectionString: testDatabaseUrl });
-  await client.connect();
-  try {
-    await client.query("DELETE FROM rate_limit_buckets");
-  } finally {
-    await client.end();
-  }
-}
-
-async function dbQuery(sql: string, params: any[] = []) {
-  const client = new Client({ connectionString: testDatabaseUrl });
-  await client.connect();
-  try {
-    return await client.query(sql, params);
-  } finally {
-    await client.end();
-  }
-}
 
 async function grantPlatformAdminPermission(userId: string, grantedById = "u1") {
   await dbQuery(
@@ -108,21 +87,6 @@ async function createCompanyUser(owner: Awaited<ReturnType<typeof loginApi>>, ro
   return email;
 }
 
-async function uploadDocument(
-  context: Awaited<ReturnType<typeof loginApi>>,
-  file: { name: string; mimeType: string; buffer: Buffer },
-  fields: Record<string, string> = {}
-) {
-  return context.post("/api/documents/upload", {
-    multipart: {
-      title: fields.title || file.name,
-      type: fields.type || "OTHER",
-      ...fields,
-      file,
-    },
-  });
-}
-
 test.describe.serial("security regression harness", () => {
   test("documents the protected API RBAC and tenant-scope policy map", async () => {
     expect(RBAC_TENANT_POLICY.length).toBeGreaterThan(0);
@@ -140,6 +104,38 @@ test.describe.serial("security regression harness", () => {
     ).toBe(true);
     expect(RBAC_TENANT_POLICY.find((policy) => policy.path === "/api/admin/overview")?.tenantScope).toBe("platform-global");
     expect(RBAC_TENANT_POLICY.filter((policy) => policy.auth === "public").every((policy) => policy.tenantScope === "public-safe")).toBe(true);
+  });
+
+  test("keeps representative protected GET routes registered and auth-gated", async () => {
+    const publicContext = await apiContext();
+    const owner = await loginApi();
+    const protectedRoutes = [
+      "/api/auth/me",
+      "/api/shipments",
+      "/api/daily-status",
+      "/api/shipment-types",
+      "/api/shipment-form-templates",
+      "/api/shipment-workflow-templates",
+      "/api/customers/c1",
+      "/api/tasks/t1",
+      "/api/organization/members",
+      "/api/documents/doc1",
+      "/api/cheques/chq1",
+      "/api/compliance-meetings/ap1",
+      "/api/quotations/q1",
+      "/api/audit-logs",
+      "/api/chat/threads",
+      "/api/admin/overview",
+    ];
+
+    try {
+      for (const route of protectedRoutes) {
+        await expectForbidden(await publicContext.get(route));
+        await readOk(await owner.get(route));
+      }
+    } finally {
+      await disposeContexts(publicContext, owner);
+    }
   });
 
   test("redirects protected pages and logs in the seed owner through the UI", async ({ page }) => {
@@ -678,27 +674,45 @@ test.describe.serial("security regression harness", () => {
     await disposeContexts(owner, publicContext);
   });
 
-  test("uses the shared PostgreSQL limiter for document upload throttles", async () => {
+  test("atomically uses the shared PostgreSQL limiter for concurrent document uploads", async () => {
     await resetRateLimitBuckets();
     const owner = await loginApi();
+    const uploadMarker = `rate-document-${crypto.randomUUID()}`;
 
-    let limitedDocumentUpload = null;
-    for (let attempt = 0; attempt < 21; attempt += 1) {
-      const response = await uploadDocument(owner, {
-        name: `rate-document-${attempt}.txt`,
-        mimeType: "text/plain",
-        buffer: Buffer.from(`rate limit document ${attempt}`),
-      });
-      if (response.status() === 429) {
-        limitedDocumentUpload = response;
-        break;
+    try {
+      const responses = await Promise.all(
+        Array.from({ length: 24 }, (_, attempt) =>
+          uploadDocument(owner, {
+            name: `${uploadMarker}-${attempt}.txt`,
+            mimeType: "text/plain",
+            buffer: Buffer.from(`rate limit document ${attempt}`),
+          })
+        )
+      );
+      const accepted = responses.filter((response) => response.status() === 200);
+      const limited = responses.filter((response) => response.status() === 429);
+
+      expect(accepted).toHaveLength(20);
+      expect(limited).toHaveLength(4);
+      for (const response of accepted) await readOk(response);
+      for (const response of limited) {
+        expect(response.headers()["retry-after"]).toBeTruthy();
       }
-      await readOk(response);
+      const buckets = await dbQuery(
+        `SELECT COUNT(*)::int AS bucket_count, COALESCE(MAX(count), 0)::int AS max_count
+         FROM rate_limit_buckets
+         WHERE key LIKE 'document-upload:%:u1'`
+      );
+      expect(Number(buckets.rows[0]?.bucket_count || 0)).toBe(1);
+      expect(Number(buckets.rows[0]?.max_count || 0)).toBe(20);
+      const protectedWrites = await dbQuery(
+        "SELECT COUNT(*)::int AS count FROM documents WHERE title LIKE $1",
+        [`${uploadMarker}-%`]
+      );
+      expect(Number(protectedWrites.rows[0]?.count || 0)).toBe(20);
+    } finally {
+      await resetRateLimitBuckets();
+      await disposeContexts(owner);
     }
-    expect(limitedDocumentUpload, "document upload should be throttled").not.toBeNull();
-    expect(limitedDocumentUpload!.headers()["retry-after"]).toBeTruthy();
-
-    await resetRateLimitBuckets();
-    await disposeContexts(owner);
   });
 });
