@@ -1,24 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "../store/useAppStore";
-import { 
-  DndContext, 
-  closestCorners, 
-  KeyboardSensor, 
-  PointerSensor, 
-  useSensor, 
-  useSensors, 
-  DragOverlay,
-  defaultDropAnimationSideEffects
-} from "@dnd-kit/core";
-import { 
-  arrayMove, 
-  SortableContext, 
-  sortableKeyboardCoordinates, 
-  verticalListSortingStrategy, 
-  useSortable 
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,17 +10,14 @@ import {
   Plus, 
   Calendar, 
   AlertCircle, 
-  GripVertical, 
   Search, 
   Trash2, 
   Edit2, 
   Clock,
-  User as UserIcon,
   Ship,
   TrendingUp,
   CheckCircle,
   Layout,
-  Filter,
   Trash,
   History
 } from "lucide-react";
@@ -50,12 +29,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { 
-  Tabs, 
-  TabsContent, 
-  TabsList, 
-  TabsTrigger 
-} from "@/components/ui/tabs";
 import { Task, TaskStatus } from "../types";
 import { cn } from "@/lib/utils";
 import { format, addDays } from "date-fns-jalali";

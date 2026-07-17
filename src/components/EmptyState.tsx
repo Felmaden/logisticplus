@@ -2,7 +2,6 @@ import type { ElementType, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 type EmptyStateAction = {
@@ -102,67 +101,6 @@ export function EmptyTableRow({
         {children}
       </td>
     </tr>
-  );
-}
-
-export type SetupChecklistItem = {
-  label: string;
-  description: string;
-  done: boolean;
-  to: string;
-  icon: ElementType;
-};
-
-export function SetupChecklist({ items }: { items: SetupChecklistItem[] }) {
-  const completed = items.filter((item) => item.done).length;
-
-  return (
-    <Card className="rounded-xl border-border bg-card shadow-sm" data-empty-state="setup-checklist">
-      <CardContent className="p-4">
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-black text-foreground">راه‌اندازی اولیه عملیات</h2>
-            <p className="mt-1 text-xs font-bold leading-6 text-muted-foreground">
-              این مسیر کوتاه، پنل تمیز شما را به اولین جریان واقعی لجستیکی وصل می‌کند.
-            </p>
-          </div>
-          <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-black text-primary">
-            {completed.toLocaleString("fa-IR")} از {items.length.toLocaleString("fa-IR")}
-          </span>
-        </div>
-        <div className="grid gap-2 md:grid-cols-2">
-          {items.map((item, index) => {
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.label}
-                to={item.to}
-                className={cn(
-                  "flex min-w-0 items-center gap-3 rounded-xl border p-3 text-right transition-colors",
-                  item.done
-                    ? "border-emerald-500/20 bg-emerald-500/5"
-                    : "border-border bg-background hover:border-primary/30 hover:bg-primary/5"
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-xs font-black",
-                    item.done ? "bg-emerald-500 text-white" : "bg-primary/10 text-primary"
-                  )}
-                >
-                  {item.done ? "✓" : (index + 1).toLocaleString("fa-IR")}
-                </span>
-                <Icon className={cn("h-4 w-4 shrink-0", item.done ? "text-emerald-600" : "text-primary")} />
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-black text-foreground">{item.label}</span>
-                  <span className="mt-1 block truncate text-[11px] font-bold text-muted-foreground">{item.description}</span>
-                </span>
-              </Link>
-            );
-          })}
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
