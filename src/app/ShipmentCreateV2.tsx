@@ -13,6 +13,11 @@ import { useApiResource } from "@/src/lib/resourceState";
 import { shipmentV2Api } from "@/src/lib/shipmentV2Api";
 import { toEnglishDigits } from "@/src/components/ShamsiDateTimeField";
 import { useAppStore } from "@/src/store/useAppStore";
+import {
+  isCommercialShipmentV2Flow,
+  shipmentV2ClassificationLabel,
+  showsShipmentV2ContainerCounts,
+} from "@/src/shared/shipment-v2-types.js";
 import type { Customer, ShipmentV2FlowCode, ShipmentV2GoodsRow, ShipmentV2LenjType } from "@/src/types";
 
 type DraftGoodsRow = Omit<ShipmentV2GoodsRow, "quantity" | "weight" | "cbm" | "pcs"> & {
@@ -24,7 +29,8 @@ type DraftGoodsRow = Omit<ShipmentV2GoodsRow, "quantity" | "weight" | "cbm" | "p
 };
 
 type CreateState = {
-  flowCode: ShipmentV2FlowCode;
+  categoryCode: "" | ShipmentV2CategoryCode;
+  subtypeCode: "" | ShipmentV2SubtypeCode;
   codeMode: "new" | "existing";
   trackingNumber: string;
   customerId: string;
@@ -32,39 +38,70 @@ type CreateState = {
   dischargePort: string;
   deliveryPort: string;
   consigneeName: string;
-  lenjType: "" | ShipmentV2LenjType;
   container20Count: string;
   container40Count: string;
   goodsRows: DraftGoodsRow[];
 };
 
-const flowOptions: Array<{
-  value: ShipmentV2FlowCode;
+type ShipmentV2CategoryCode = "MALVANI" | "COMMERCIAL";
+type ShipmentV2SubtypeCode =
+  | "MALVANI_TEH_LENJI"
+  | "MALVANI_STANDARD"
+  | "MALVANI_KOLEBARI"
+  | "MALVANI_PILEVARI"
+  | "MALVANI_AIR"
+  | "COMMERCIAL_SHIP"
+  | "COMMERCIAL_TRUCK"
+  | "COMMERCIAL_RAIL"
+  | "COMMERCIAL_AIR";
+
+type ShipmentV2SubtypeOption = {
+  value: ShipmentV2SubtypeCode;
+  label: string;
+  availability: "active" | "coming_soon";
+  flowCode?: ShipmentV2FlowCode;
+  lenjType?: ShipmentV2LenjType;
+};
+
+const categoryOptions: Array<{
+  value: ShipmentV2CategoryCode;
   title: string;
   description: string;
   icon: typeof Anchor;
 }> = [
   {
-    value: "IMPORT_LANJ",
-    title: "واردات → لنج",
-    description: "پرونده واردات دریایی سبک با ساختار تمیز V2.",
+    value: "MALVANI",
+    title: "ملوانی",
+    description: "ته‌لنجی، ملوانی و مسیرهای ملوانی در حال توسعه.",
     icon: Anchor,
   },
   {
-    value: "IMPORT_SHIP",
-    title: "واردات → کشتی",
-    description: "پرونده واردات کشتی یا کانتینری با پروفایل عملیاتی V2.",
+    value: "COMMERCIAL",
+    title: "تجاری",
+    description: "کشتی، قطار و مسیرهای تجاری در حال توسعه.",
     icon: Ship,
   },
 ];
 
-const lenjTypeOptions: Array<{ value: ShipmentV2LenjType; label: string }> = [
-  { value: "TEH_LENJI", label: "ته لنجی" },
-  { value: "MALVANI", label: "ملوانی" },
-];
+const subtypeOptionsByCategory: Record<ShipmentV2CategoryCode, ShipmentV2SubtypeOption[]> = {
+  MALVANI: [
+    { value: "MALVANI_TEH_LENJI", label: "ته‌لنجی", availability: "active", flowCode: "IMPORT_LANJ", lenjType: "TEH_LENJI" },
+    { value: "MALVANI_STANDARD", label: "ملوانی", availability: "active", flowCode: "IMPORT_LANJ", lenjType: "MALVANI" },
+    { value: "MALVANI_KOLEBARI", label: "کوله‌بری", availability: "coming_soon" },
+    { value: "MALVANI_PILEVARI", label: "پیله‌وری", availability: "coming_soon" },
+    { value: "MALVANI_AIR", label: "هوایی", availability: "coming_soon" },
+  ],
+  COMMERCIAL: [
+    { value: "COMMERCIAL_SHIP", label: "کشتی", availability: "active", flowCode: "IMPORT_SHIP" },
+    { value: "COMMERCIAL_TRUCK", label: "ماشینی (تراک)", availability: "coming_soon" },
+    { value: "COMMERCIAL_RAIL", label: "قطار (ریلی)", availability: "coming_soon", flowCode: "IMPORT_RAIL" },
+    { value: "COMMERCIAL_AIR", label: "هوایی", availability: "coming_soon" },
+  ],
+};
 
 const initialState: CreateState = {
-  flowCode: "IMPORT_LANJ",
+  categoryCode: "",
+  subtypeCode: "",
   codeMode: "new",
   trackingNumber: "",
   customerId: "",
@@ -72,11 +109,15 @@ const initialState: CreateState = {
   dischargePort: "",
   deliveryPort: "",
   consigneeName: "",
-  lenjType: "TEH_LENJI",
   container20Count: "",
   container40Count: "",
   goodsRows: [{ id: "goods-create-empty", description: "", packagingType: "", quantity: "", weight: "", cbm: "", pcs: "" }],
 };
+
+function selectedSubtype(state: Pick<CreateState, "categoryCode" | "subtypeCode">) {
+  if (!state.categoryCode || !state.subtypeCode) return null;
+  return subtypeOptionsByCategory[state.categoryCode].find((option) => option.value === state.subtypeCode) || null;
+}
 
 function optionalNumber(value: string) {
   const trimmed = toEnglishDigits(value)
@@ -142,6 +183,11 @@ function formatDraftGoodsTotal(value: number | null) {
 
 function validateCreateState(state: CreateState) {
   const errors: Record<string, string> = {};
+  if (!state.categoryCode) errors.categoryCode = "دسته محموله را انتخاب کنید.";
+  if (!state.subtypeCode) errors.subtypeCode = "نوع محموله را انتخاب کنید.";
+  const subtype = selectedSubtype(state);
+  if (subtype && subtype.availability !== "active") errors.subtypeCode = "این نوع محموله هنوز فعال نشده است.";
+  if (!subtype?.flowCode) return errors;
   if (state.codeMode === "existing" && !state.trackingNumber.trim()) {
     errors.trackingNumber = "فرمت کد محموله معتبر نیست. مثال صحیح: 14050316020";
   }
@@ -149,7 +195,6 @@ function validateCreateState(state: CreateState) {
   if (!state.origin.trim()) errors.origin = "مبدا را وارد کنید.";
   if (!state.dischargePort.trim()) errors.dischargePort = "محل تخلیه را وارد کنید.";
   if (!state.deliveryPort.trim()) errors.deliveryPort = "بندر تحویل را وارد کنید.";
-  if (state.flowCode === "IMPORT_LANJ" && !state.lenjType) errors.lenjType = "نوع لنج را انتخاب کنید.";
   return errors;
 }
 
@@ -169,8 +214,12 @@ export default function ShipmentCreateV2() {
   const [customerSearch, setCustomerSearch] = React.useState("");
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = React.useState(false);
 
-  const selectedFlow = flowOptions.find((flow) => flow.value === state.flowCode) || flowOptions[0];
-  const showContainerCounts = state.flowCode === "IMPORT_SHIP";
+  const availableSubtypeOptions = state.categoryCode ? subtypeOptionsByCategory[state.categoryCode] : [];
+  const activeSubtype = selectedSubtype(state);
+  const selectedFlowCode = activeSubtype?.availability === "active" ? activeSubtype.flowCode || null : null;
+  const selectedLenjType = activeSubtype?.availability === "active" ? activeSubtype.lenjType || null : null;
+  const showContainerCounts = showsShipmentV2ContainerCounts(selectedFlowCode);
+  const isCommercialFlow = isCommercialShipmentV2Flow(selectedFlowCode);
   const currentUserRole = String(currentUser?.role || "").toUpperCase();
   const canUseExistingCode = currentUserRole === "CEO" || currentUserRole === "MANAGER" || currentUser?.permissions?.includes("platform.admin");
   const selectedCustomer = React.useMemo(
@@ -269,21 +318,22 @@ export default function ShipmentCreateV2() {
     const nextErrors = validateCreateState(state);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length) return;
+    if (!selectedFlowCode) return;
 
     setIsSaving(true);
     try {
       const container20Count = optionalNumber(state.container20Count);
       const container40Count = optionalNumber(state.container40Count);
       const response = await shipmentV2Api.create({
-        flowCode: state.flowCode,
+        flowCode: selectedFlowCode,
         codeMode: state.codeMode,
         trackingNumber: state.codeMode === "existing" ? state.trackingNumber.trim() || undefined : undefined,
         customerId: state.customerId,
         origin: state.origin.trim(),
         dischargePort: state.dischargePort.trim(),
         deliveryPort: state.deliveryPort.trim(),
-        consigneeName: state.flowCode === "IMPORT_SHIP" ? state.consigneeName.trim() || undefined : undefined,
-        lenjType: state.flowCode === "IMPORT_LANJ" ? state.lenjType || null : null,
+        consigneeName: isCommercialFlow ? state.consigneeName.trim() || undefined : undefined,
+        lenjType: selectedFlowCode === "IMPORT_LANJ" ? selectedLenjType : null,
         container20Count: showContainerCounts && container20Count !== null ? container20Count : undefined,
         container40Count: showContainerCounts && container40Count !== null ? container40Count : undefined,
         goodsRows: buildGoodsRows(),
@@ -332,18 +382,18 @@ export default function ShipmentCreateV2() {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <section className="space-y-3">
           <div>
-            <h2 className="text-sm font-black text-foreground">جریان محموله</h2>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">در این نسخه فقط دو مسیر واردات فعال است.</p>
+            <h2 className="text-sm font-black text-foreground">دسته محموله</h2>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">ابتدا دسته و سپس نوع واردات را انتخاب کنید.</p>
           </div>
           <div className="grid gap-3">
-            {flowOptions.map((flow) => {
-              const Icon = flow.icon;
-              const selected = state.flowCode === flow.value;
+            {categoryOptions.map((category) => {
+              const Icon = category.icon;
+              const selected = state.categoryCode === category.value;
               return (
                 <button
-                  key={flow.value}
+                  key={category.value}
                   type="button"
-                  data-testid={`shipment-v2-flow-${flow.value}`}
+                  data-testid={`shipment-v2-category-${category.value}`}
                   aria-pressed={selected}
                   className={cn(
                     "rounded-xl border p-4 text-right transition-colors",
@@ -353,8 +403,11 @@ export default function ShipmentCreateV2() {
                     setErrors({});
                     setState((current) => ({
                       ...current,
-                      flowCode: flow.value,
-                      lenjType: flow.value === "IMPORT_LANJ" ? current.lenjType || "TEH_LENJI" : "",
+                      categoryCode: category.value,
+                      subtypeCode: "",
+                      consigneeName: "",
+                      container20Count: "",
+                      container40Count: "",
                     }));
                   }}
                 >
@@ -363,16 +416,53 @@ export default function ShipmentCreateV2() {
                       <Icon className="h-5 w-5" />
                     </span>
                     <span className="min-w-0">
-                      <span className="block text-sm font-black text-foreground">{flow.title}</span>
-                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">{flow.description}</span>
+                      <span className="block text-sm font-black text-foreground">{category.title}</span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">{category.description}</span>
                     </span>
                   </span>
                 </button>
               );
             })}
           </div>
+          <FieldError message={errors.categoryCode} />
+
+          {state.categoryCode ? (
+            <div className="space-y-1.5 rounded-xl border border-border bg-card p-3">
+              <Label htmlFor="shipment-v2-subtype" className="text-xs font-black text-muted-foreground">
+                نوع {state.categoryCode === "MALVANI" ? "ملوانی" : "تجاری"}
+              </Label>
+              <select
+                id="shipment-v2-subtype"
+                data-testid="shipment-v2-subtype"
+                className="h-10 w-full rounded-md border border-border bg-background px-3 text-xs font-bold outline-none focus:ring-1 focus:ring-primary/50"
+                value={state.subtypeCode}
+                onChange={(event) => {
+                  const nextSubtype = availableSubtypeOptions.find((option) => option.value === event.target.value);
+                  if (!nextSubtype || nextSubtype.availability !== "active") return;
+                  setErrors((current) => ({ ...current, subtypeCode: "" }));
+                  setState((current) => ({
+                    ...current,
+                    subtypeCode: nextSubtype.value,
+                    consigneeName: "",
+                    container20Count: "",
+                    container40Count: "",
+                  }));
+                }}
+              >
+                <option value="" disabled>نوع محموله را انتخاب کنید</option>
+                {availableSubtypeOptions.map((option) => (
+                  <option key={option.value} value={option.value} disabled={option.availability !== "active"}>
+                    {option.label}{option.availability === "coming_soon" ? " — به‌زودی" : ""}
+                  </option>
+                ))}
+              </select>
+              <FieldError message={errors.subtypeCode} />
+              <p className="text-[10px] font-bold leading-5 text-muted-foreground">گزینه‌های «به‌زودی» قابل انتخاب یا ثبت نیستند.</p>
+            </div>
+          ) : null}
         </section>
 
+        {selectedFlowCode ? (
         <Card className="rounded-xl border-border bg-card shadow-sm">
           <CardHeader className="border-b border-border/60 p-4">
             <CardTitle className="flex items-center gap-2 text-sm font-black">
@@ -383,7 +473,7 @@ export default function ShipmentCreateV2() {
           <CardContent className="space-y-4 p-4">
             <div className="rounded-lg border border-border bg-muted/25 p-3">
               <p className="text-[11px] font-black text-muted-foreground">جریان انتخاب‌شده</p>
-              <p className="mt-1 text-sm font-black text-foreground">{selectedFlow.title}</p>
+              <p className="mt-1 text-sm font-black text-foreground">{shipmentV2ClassificationLabel(selectedFlowCode, selectedLenjType)}</p>
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -569,7 +659,7 @@ export default function ShipmentCreateV2() {
 
               <div className="space-y-1.5">
                 <Label htmlFor="shipment-v2-delivery-port" className="text-xs font-bold text-muted-foreground">
-                  بندر تحویل
+                  {selectedFlowCode === "IMPORT_RAIL" ? "مقصد / محل تحویل" : "بندر تحویل"}
                 </Label>
                 <Input
                   id="shipment-v2-delivery-port"
@@ -581,7 +671,7 @@ export default function ShipmentCreateV2() {
                 <FieldError message={errors.deliveryPort} />
               </div>
 
-              {state.flowCode === "IMPORT_SHIP" ? (
+              {isCommercialFlow ? (
                 <div className="space-y-1.5">
                   <Label htmlFor="shipment-v2-consignee" className="text-xs font-bold text-muted-foreground">
                     کانساینی
@@ -594,25 +684,7 @@ export default function ShipmentCreateV2() {
                     onChange={(event) => updateField("consigneeName", event.target.value)}
                   />
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <Label htmlFor="shipment-v2-lenj-type" className="text-xs font-bold text-muted-foreground">
-                    نوع لنج
-                  </Label>
-                  <select
-                    id="shipment-v2-lenj-type"
-                    data-testid="shipment-v2-lenj-type"
-                    className="h-10 w-full rounded-md border border-border bg-background px-3 text-xs font-bold outline-none focus:ring-1 focus:ring-primary/50"
-                    value={state.lenjType}
-                    onChange={(event) => updateField("lenjType", event.target.value as CreateState["lenjType"])}
-                  >
-                    {lenjTypeOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                  <FieldError message={errors.lenjType} />
-                </div>
-              )}
+              ) : null}
             </div>
 
             <div className="space-y-3 rounded-lg border border-border bg-muted/15 p-3" data-testid="shipment-v2-create-goods-section">
@@ -774,6 +846,15 @@ export default function ShipmentCreateV2() {
             </div>
           </CardContent>
         </Card>
+        ) : (
+          <Card className="flex min-h-56 items-center justify-center rounded-xl border-dashed border-border bg-card/60 shadow-none">
+            <CardContent className="p-6 text-center">
+              <Package className="mx-auto h-8 w-8 text-muted-foreground" />
+              <p className="mt-3 text-sm font-black text-foreground">نوع محموله را انتخاب کنید</p>
+              <p className="mt-1 text-xs font-bold leading-5 text-muted-foreground">فرم ثبت پس از انتخاب یک نوع فعال نمایش داده می‌شود.</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

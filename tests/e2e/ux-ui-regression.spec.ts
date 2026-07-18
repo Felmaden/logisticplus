@@ -142,7 +142,8 @@ async function createShipmentFromV2(page: Page) {
   await expect(page.locator("#container")).toHaveCount(0);
   await expect(page.getByTestId("shamsi-date-time-trigger")).toHaveCount(0);
 
-  await page.getByTestId("shipment-v2-flow-IMPORT_LANJ").click();
+  await page.getByTestId("shipment-v2-category-MALVANI").click();
+  await page.getByTestId("shipment-v2-subtype").selectOption("MALVANI_STANDARD");
   await page.getByTestId("shipment-v2-customer").fill(customerIdentifier);
   await expect(page.getByTestId("shipment-v2-customer-suggestions")).toBeVisible();
   await page.getByTestId("shipment-v2-customer-suggestion-0").click();
@@ -150,7 +151,6 @@ async function createShipmentFromV2(page: Page) {
   await page.getByTestId("shipment-v2-origin").fill("Dubai");
   await page.getByTestId("shipment-v2-discharge-port").fill("Bandar Abbas");
   await page.getByTestId("shipment-v2-delivery-port").fill("Tehran");
-  await page.getByTestId("shipment-v2-lenj-type").selectOption("MALVANI");
   await page.getByTestId("shipment-v2-submit").click();
 }
 

@@ -22,6 +22,12 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { isShipmentTerminalStatus, shipmentStatusLabel } from "@/src/shared/shipment-statuses.js";
+import {
+  isLanjShipmentV2Flow,
+  shipmentV2ClassificationLabel,
+  shipmentV2FlowCodeForShipmentType,
+  showsShipmentV2ContainerCounts,
+} from "@/src/shared/shipment-v2-types.js";
 import type {
   BusinessEntityContact,
   CommercialCard,
@@ -38,11 +44,6 @@ import type {
 } from "@/src/types";
 
 const EMPTY_TEXT = "ثبت نشده";
-
-const flowLabels: Record<ShipmentV2FlowCode, string> = {
-  IMPORT_LANJ: "واردات لنج",
-  IMPORT_SHIP: "واردات کشتی",
-};
 
 const customsRouteLabels: Record<ShipmentV2CustomsRoute, string> = {
   GREEN: "سبز",
@@ -141,11 +142,6 @@ function ProfileGoodsTotalsRow({ rows }: { rows: ShipmentV2GoodsRow[] }) {
       </div>
     </div>
   );
-}
-
-function inferFlowCode(shipment: ShipmentV2ShipmentSummary): ShipmentV2FlowCode {
-  const typeCode = (shipment.shipmentTypeCode || "").toUpperCase();
-  return typeCode.includes("LENJ") || typeCode.includes("LANJ") ? "IMPORT_LANJ" : "IMPORT_SHIP";
 }
 
 function commercialCardDisplayName(card?: CommercialCard | null) {
@@ -280,7 +276,7 @@ export function ShipmentV2ReadOnlyProfile({
   documentCount: number;
 }) {
   const shipment = data.shipment;
-  const flowCode = data.profile?.flowCode || inferFlowCode(shipment);
+  const flowCode = data.profile?.flowCode || shipmentV2FlowCodeForShipmentType(shipment.shipmentTypeCode) as ShipmentV2FlowCode;
   const sections: ShipmentV2Sections = {
     ...emptySections,
     ...(data.profile?.sections || {}),
@@ -320,7 +316,7 @@ export function ShipmentV2ReadOnlyProfile({
     },
   };
   const base = sections.base;
-  const isLanj = flowCode === "IMPORT_LANJ";
+  const isLanj = isLanjShipmentV2Flow(flowCode);
   const credentialLabel = isLanj ? "ملوانی" : "کارت بازرگانی";
   const credentialId = isLanj ? base.malvaniProfileId : base.commercialCardId;
   const credentialDisplay = isLanj ? base.malvaniDisplayName : base.commercialCardDisplayName;
@@ -354,7 +350,7 @@ export function ShipmentV2ReadOnlyProfile({
     } as Shipment];
   }, [customerDisplay, shipment, shipments]);
   const canOpenCredential = Boolean(isLanj ? linkedMalvaniProfile : linkedCommercialCard);
-  const showContainerCounts = flowCode === "IMPORT_SHIP";
+  const showContainerCounts = showsShipmentV2ContainerCounts(flowCode);
   const goodsRows = sections.goods.goodsRows || [];
   const permitRows = sections.permits.permitRows || [];
   const updatedAt = data.profile?.updatedAt || shipment.updatedAt || shipment.createdAt;
@@ -365,7 +361,7 @@ export function ShipmentV2ReadOnlyProfile({
         <header className="border-b border-border bg-muted/20 px-4 py-4 sm:px-5">
           <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-[11px] font-black text-primary">{flowLabels[flowCode]}</p>
+              <p className="text-[11px] font-black text-primary">{shipmentV2ClassificationLabel(flowCode, base.lenjType)}</p>
               <h2 className="mt-1 truncate text-lg font-black text-foreground">
                 {displayValue(shipment.trackingNumber)}
               </h2>

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { requireOrganizationScope } from "../../../shared/middleware/tenant.middleware.js";
 import { KOOTAJ_COLUMN_BY_FIELD } from "./shipment-kootaj.repository.js";
 import { defaultV2SectionsForShipment } from "./shipment-kootaj.service.js";
+import { shipmentV2FlowCodeForShipmentType } from "../../../../../src/shared/shipment-v2-types.js";
 
 export const KOOTAJ_OPERATION_UPDATE_FIELDS = [
   "cotageNumber",
@@ -74,12 +75,6 @@ function assertExpectedKootajVersion(currentUpdatedAt, expectedKootajUpdatedAt) 
 function kootajOperationDbValue(field, value) {
   if (field === "cotageNumber") return trimNullableText(value);
   return value ?? null;
-}
-
-function shipmentV2FlowCodeForShipment(shipment = {}) {
-  return String(shipment.shipment_type_code || "").toUpperCase().includes("LENJ")
-    ? "IMPORT_LANJ"
-    : "IMPORT_SHIP";
 }
 
 export function pickKootajOperationUpdates(updates = {}) {
@@ -175,7 +170,7 @@ async function syncShipmentV2DeclarationFromKootaj(queryable, {
       crypto.randomUUID(),
       organizationId,
       shipmentId,
-      shipmentV2FlowCodeForShipment(shipmentRow),
+      shipmentV2FlowCodeForShipmentType(shipmentRow.shipment_type_code),
       JSON.stringify(nextSections),
       actorUserId || null,
     ]

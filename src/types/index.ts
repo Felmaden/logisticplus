@@ -107,7 +107,7 @@ export interface Shipment {
   assignedManagerId?: string;
   updatedAt?: string;
 }
-export type ShipmentV2FlowCode = "IMPORT_LANJ" | "IMPORT_SHIP";
+export type ShipmentV2FlowCode = "IMPORT_LANJ" | "IMPORT_SHIP" | "IMPORT_RAIL";
 export type ShipmentV2SectionKey =
   | "base"
   | "orderRegistration"

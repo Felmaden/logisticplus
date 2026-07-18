@@ -1,4 +1,5 @@
 import { BASE_SECTION_DEFAULTS } from "./shipment-kootaj.repository.js";
+import { shipmentV2FlowCodeForShipmentType } from "../../../../../src/shared/shipment-v2-types.js";
 
 function hasOwn(value, key) {
   return Object.prototype.hasOwnProperty.call(value || {}, key);
@@ -17,14 +18,14 @@ function trimNullableText(value) {
 }
 
 export function defaultV2SectionsForShipment(shipment = {}) {
-  const flowCode = String(shipment.shipment_type_code || "").toUpperCase().includes("LENJ") ? "IMPORT_LANJ" : "IMPORT_SHIP";
+  const flowCode = shipmentV2FlowCodeForShipmentType(shipment.shipment_type_code);
   return {
     base: {
       ...BASE_SECTION_DEFAULTS,
       trackingNumber: normalizeText(shipment.shipment_code),
       origin: normalizeText(shipment.origin),
       deliveryPort: normalizeText(shipment.destination),
-      lenjType: flowCode === "IMPORT_LANJ" ? "MALVANI" : null,
+      lenjType: null,
     },
     orderRegistration: {},
     goods: { goodsRows: [] },

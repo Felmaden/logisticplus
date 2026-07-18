@@ -48,6 +48,12 @@ import {
   SHIPMENT_STATUS_OPTIONS,
   shipmentStatusLabel,
 } from "@/src/shared/shipment-statuses.js";
+import {
+  isLanjShipmentV2Flow,
+  shipmentV2ClassificationLabel,
+  shipmentV2FlowCodeForShipmentType,
+  showsShipmentV2ContainerCounts,
+} from "@/src/shared/shipment-v2-types.js";
 import { useAppDataStore } from "@/src/store/useAppStore";
 import type {
   CommercialCard,
@@ -101,11 +107,6 @@ const sectionDefinitions: Array<{
   { key: "banking", title: "اطلاعات بانکی", icon: Landmark },
   { key: "notes", title: "یادداشت ها", icon: NotebookText },
 ];
-
-const flowLabels: Record<ShipmentV2FlowCode, string> = {
-  IMPORT_LANJ: "واردات → لنج",
-  IMPORT_SHIP: "واردات → کشتی",
-};
 
 const customsRouteLabels: Record<ShipmentV2CustomsRoute, string> = {
   GREEN: "سبز",
@@ -563,7 +564,8 @@ function BaseSection({
   const [activeCredentialSearch, setActiveCredentialSearch] = React.useState(false);
   const [viewingCredential, setViewingCredential] = React.useState<"commercial_card" | "malvani" | null>(null);
   const [isCustomerDialogOpen, setIsCustomerDialogOpen] = React.useState(false);
-  const isLanjFlow = flowCode === "IMPORT_LANJ";
+  const isLanjFlow = isLanjShipmentV2Flow(flowCode);
+  const showContainerCounts = showsShipmentV2ContainerCounts(flowCode);
   const credentialLabel = isLanjFlow ? "ملوانی" : "کارت بازرگانی";
   const documentCountText = isDocumentCountLoading
     ? "در حال دریافت"
@@ -883,7 +885,7 @@ function BaseSection({
             <BaseInfoCard label="تعداد کالا" testId="shipment-v2-base-total-quantity">
               {formatGoodsMetric(totalQuantity)}
             </BaseInfoCard>
-            {!isLanjFlow ? (
+            {showContainerCounts ? (
               <BaseInfoCard label="تعداد کانتینر" testId="shipment-v2-base-total-container-count">
                 {formatGoodsMetric(totalContainerCount)}
               </BaseInfoCard>
@@ -1059,7 +1061,7 @@ function GoodsSection({
   const [container20Count, setContainer20Count] = React.useState("");
   const [container40Count, setContainer40Count] = React.useState("");
   const [rows, setRows] = React.useState<GoodsDraftRow[]>([]);
-  const showContainerCounts = flowCode === "IMPORT_SHIP";
+  const showContainerCounts = showsShipmentV2ContainerCounts(flowCode);
 
   const resetDraft = React.useCallback(() => {
     setContainer20Count(data.container20Count === null || data.container20Count === undefined ? "" : String(data.container20Count));
@@ -2057,7 +2059,9 @@ export default function ShipmentDetail() {
   const [dailyStatusRow, setDailyStatusRow] = React.useState<DailyStatusBoardRow | null>(null);
   const [malvaniProfiles, setMalvaniProfiles] = React.useState<MalvaniProfile[]>([]);
   const [isMalvaniLoading, setIsMalvaniLoading] = React.useState(false);
-  const profileFlowCode = data?.profile?.flowCode || "IMPORT_SHIP";
+  const profileFlowCode = data?.profile?.flowCode || (
+    data?.shipment ? shipmentV2FlowCodeForShipmentType(data.shipment.shipmentTypeCode) : "IMPORT_SHIP"
+  );
 
   React.useLayoutEffect(() => {
     const scrollToHeader = () => {
@@ -2109,7 +2113,7 @@ export default function ShipmentDetail() {
   }, []);
 
   React.useEffect(() => {
-    if (profileFlowCode === "IMPORT_LANJ") void loadMalvaniProfiles();
+    if (isLanjShipmentV2Flow(profileFlowCode)) void loadMalvaniProfiles();
   }, [loadMalvaniProfiles, profileFlowCode]);
 
   React.useEffect(() => {
@@ -2260,7 +2264,7 @@ export default function ShipmentDetail() {
                   {shipment.trackingNumber}
                 </h1>
                 <Badge variant="outline" className="rounded-lg text-[11px] font-black">
-                  {flowLabels[flowCode]}
+                  {shipmentV2ClassificationLabel(flowCode, baseSection?.lenjType)}
                 </Badge>
                 <Badge variant="outline" className="rounded-lg text-[11px] font-black">
                   {shipmentStatusLabel(shipment.status)}

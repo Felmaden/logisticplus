@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { shipmentApi } from "@/src/lib/shipmentApi";
 import { shipmentV2Api } from "@/src/lib/shipmentV2Api";
+import { isCommercialShipmentV2Flow } from "@/src/shared/shipment-v2-types.js";
 import { useAppStore } from "@/src/store/useAppStore";
 import type { Customer, Shipment } from "@/src/types";
 
@@ -139,7 +140,7 @@ export function ShipmentEdit() {
     );
   }
 
-  const canEditConsignee = shipment?.hasV2Profile && shipment.v2FlowCode === "IMPORT_SHIP";
+  const canEditConsignee = shipment?.hasV2Profile && isCommercialShipmentV2Flow(shipment.v2FlowCode);
 
   return (
     <div className="app-page min-h-[calc(100vh-6rem)]" dir="rtl">

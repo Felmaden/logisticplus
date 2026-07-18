@@ -13,6 +13,10 @@ import {
   getIranImportStep,
 } from "../../../../src/shared/iran-import-customs-workflow.js";
 import { normalizeShipmentStatus, shipmentStatusLabel } from "../../../../src/shared/shipment-statuses.js";
+import {
+  isLanjShipmentV2Flow,
+  shipmentV2FlowCodeForShipmentType,
+} from "../../../../src/shared/shipment-v2-types.js";
 import { normalizeWorkflowDefinition } from "../../../../src/server/repositories/shipment-workflow-templates.js";
 import {
   getActiveShipmentFormTemplateForShipment,
@@ -106,10 +110,9 @@ function isLenjShipment(row, base = {}) {
   const shipmentTypeCode = normalizeText(row.shipment_type_code).toUpperCase();
   const lenjType = normalizeText(base.lenjType).toUpperCase();
   return (
-    flowCode === "IMPORT_LANJ" ||
+    isLanjShipmentV2Flow(flowCode) ||
     flowCode === "IMPORT_LENJ" ||
-    shipmentTypeCode.includes("LENJ") ||
-    shipmentTypeCode.includes("LANJ") ||
+    isLanjShipmentV2Flow(shipmentV2FlowCodeForShipmentType(shipmentTypeCode)) ||
     lenjType === "MALVANI" ||
     lenjType === "TEH_LENJI"
   );
@@ -927,7 +930,7 @@ export async function updateDailyStatusRow(pool, {
               crypto.randomUUID(),
               scopedOrganizationId,
               shipmentId,
-              String(shipmentRow.shipment_type_code || "").toUpperCase().includes("LENJ") ? "IMPORT_LANJ" : "IMPORT_SHIP",
+              shipmentV2FlowCodeForShipmentType(shipmentRow.shipment_type_code),
               JSON.stringify(nextSections),
               actorUserId || null,
             ]
