@@ -20,16 +20,6 @@ import {
   listDocumentStorageKeysForCleanup as listDocumentStorageKeysForCleanupFromRepository,
 } from "../../server/src/modules/documents/document.repository.js";
 import {
-  getChequeRecord as getChequeRecordFromRepository,
-  listCheques as listChequesFromRepository,
-  toUiCheque as toUiChequeFromRepository,
-} from "./repositories/cheques.js";
-import {
-  getComplianceMeetingRecord as getComplianceMeetingRecordFromRepository,
-  listComplianceMeetings as listComplianceMeetingsFromRepository,
-  toUiAppointment as toUiAppointmentFromRepository,
-} from "./repositories/compliance-meetings.js";
-import {
   canViewCustomerPrivateDetails,
   getCustomerRecord as getCustomerRecordFromRepository,
   listCustomerRelated as listCustomerRelatedFromRepository,
@@ -68,6 +58,73 @@ export { checkDatabase, createApiError, pool };
 const TRANSIENT_SESSION_HOURS = 12;
 const REMEMBER_SESSION_DAYS = 30;
 const QUOTATIONS_UI_SURFACE_ENABLED = false;
+const RETIRED_COMPATIBILITY_COLLECTIONS = new Set(["cheques", "appointments"]);
+const RETIRED_ENTITY_TYPES = new Set(["CHEQUE", "APPOINTMENT", "COMPLIANCE_MEETING"]);
+const RETIRED_PERMISSION_KEYS = new Set(["cheques.manage", "compliance.manage"]);
+const RETIRED_SUBSCRIPTION_KEYS = new Set(["cheques", "compliance"]);
+const RETIRED_ROUTE_PATTERN = /^\/(?:cheques|appointments|compliance|compliance-meetings)(?:\/|[?#]|$)/i;
+const RETIRED_BUSINESS_PLAN_DESCRIPTION = "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری، چک و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.";
+const CURRENT_BUSINESS_PLAN_DESCRIPTION = "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.";
+
+function normalizeRetiredRole(role) {
+  return String(role || "").toUpperCase() === "COMPLIANCE_STAFF" ? "OPERATIONS" : role;
+}
+
+function stripRetiredSubscriptionKeys(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !RETIRED_SUBSCRIPTION_KEYS.has(String(key).toLowerCase()))
+  );
+}
+
+function isRetiredTaskSource(sourceType) {
+  return String(sourceType || "").toUpperCase() === "COMPLIANCE_MEETING";
+}
+
+function hasRetiredTaskSource(data = {}) {
+  return [data?.sourceType, data?.source_type].some(isRetiredTaskSource);
+}
+
+function isRetiredNotificationPayload(payload = {}) {
+  return [payload.source_type, payload.sourceType]
+    .some((sourceType) => RETIRED_ENTITY_TYPES.has(String(sourceType || "").toUpperCase()))
+    || [payload.source_id, payload.sourceId, payload.link, payload.legacy_data?.link]
+      .some((value) => RETIRED_ROUTE_PATTERN.test(String(value || "")));
+}
+
+function isRetiredCompatibilityRow(row) {
+  const collection = String(row?.collection || "");
+  const normalizedCollection = collection.toLowerCase();
+  if (RETIRED_COMPATIBILITY_COLLECTIONS.has(normalizedCollection)) return true;
+  if (normalizedCollection === "deleteditems") {
+    return [row?.data?.entityType, row?.data?.entity_type]
+      .some((entityType) => RETIRED_ENTITY_TYPES.has(String(entityType || "").toUpperCase()));
+  }
+  return normalizedCollection === "notifications" && isRetiredNotificationPayload(row?.data || {});
+}
+
+function sanitizeCompatibilityData(collection, data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return data;
+  const normalizedCollection = String(collection || "").toLowerCase();
+  if (normalizedCollection === "users" && String(data.role || "").toUpperCase() === "COMPLIANCE_STAFF") {
+    return { ...data, role: "OPERATIONS" };
+  }
+  if (normalizedCollection === "tasks" && hasRetiredTaskSource(data)) {
+    const next = { ...data, sourceType: "MANUAL" };
+    delete next.sourceId;
+    delete next.source_id;
+    delete next.source_type;
+    return next;
+  }
+  if (
+    normalizedCollection === "deleteditems"
+    && [data.entityType, data.entity_type].some((entityType) => String(entityType || "").toUpperCase() === "TASK")
+    && hasRetiredTaskSource(data.data)
+  ) {
+    return { ...data, data: sanitizeCompatibilityData("tasks", data.data) };
+  }
+  return data;
+}
 
 export function hashSessionToken(token) {
   return crypto.createHash("sha256").update(token).digest("hex");
@@ -89,7 +146,9 @@ export async function getUserByEmail(email) {
      LIMIT 1`,
     [email]
   );
-  return result.rows[0] || null;
+  const user = result.rows[0] || null;
+  if (user) user.role = normalizeRetiredRole(user.role);
+  return user;
 }
 
 function normalizeDigits(value) {
@@ -564,6 +623,7 @@ async function searchArchive({ user, normalizedQuery, fetchLimit }) {
      WHERE ar.organization_id = ${organizationParam}
        AND ar.restored_at IS NULL
        AND (${includeQuotationArchiveParam}::boolean OR ar.entity_type <> 'quotation')
+       AND LOWER(ar.entity_type) NOT IN ('cheque', 'appointment', 'compliance_meeting')
        AND ${matcher.condition}
      ORDER BY search_score DESC, COALESCE(ar.archived_at, NOW()) DESC
      LIMIT ${limitParam}`,
@@ -575,10 +635,11 @@ async function searchArchive({ user, normalizedQuery, fetchLimit }) {
 async function searchUsers({ user, normalizedQuery, fetchLimit }) {
   const values = [];
   const organizationParam = `$${values.push(user.organizationId)}`;
+  const roleExpression = "CASE WHEN UPPER(u.role) = 'COMPLIANCE_STAFF' THEN 'OPERATIONS' ELSE u.role END";
   const fields = {
     name: normalizedSearchSql("u.name"),
     email: normalizedSearchSql("u.email"),
-    role: normalizedSearchSql("u.role"),
+    role: normalizedSearchSql(roleExpression),
     department: normalizedSearchSql("u.department"),
     phone: normalizedSearchSql("u.phone"),
   };
@@ -589,7 +650,7 @@ async function searchUsers({ user, normalizedQuery, fetchLimit }) {
        u.id,
        'user' AS result_type,
        COALESCE(NULLIF(u.name, ''), u.email, u.id) AS title,
-       CONCAT_WS(' · ', NULLIF(u.role, ''), NULLIF(u.department, ''), NULLIF(u.email, '')) AS subtitle,
+       CONCAT_WS(' · ', NULLIF(${roleExpression}, ''), NULLIF(u.department, ''), NULLIF(u.email, '')) AS subtitle,
        COALESCE(NULLIF(u.phone, ''), 'کاربر شرکت') AS description,
        '/management' AS url,
        COALESCE(u.updated_at, u.created_at) AS updated_at,
@@ -597,7 +658,7 @@ async function searchUsers({ user, normalizedQuery, fetchLimit }) {
        jsonb_build_object(
          'name', u.name,
          'email', u.email,
-         'role', u.role,
+         'role', ${roleExpression},
          'department', u.department,
          'phone', u.phone
        ) AS field_values,
@@ -679,13 +740,16 @@ export async function getUserById(userId) {
      LIMIT 1`,
     [userId]
   );
-  return result.rows[0] || null;
+  const user = result.rows[0] || null;
+  if (user) user.role = normalizeRetiredRole(user.role);
+  return user;
 }
 
 function recordsFromRows(rows) {
   return rows.reduce((acc, row) => {
+    if (isRetiredCompatibilityRow(row)) return acc;
     if (!acc[row.collection]) acc[row.collection] = [];
-    acc[row.collection].push(row.data);
+    acc[row.collection].push(sanitizeCompatibilityData(row.collection, row.data));
     return acc;
   }, {});
 }
@@ -752,7 +816,6 @@ export async function getRecordsForUser(ownerUserId, { organizationId, tenantCon
     shipments,
     tasks,
     documents,
-    appointments,
     quotes,
     shipmentSteps,
     commercialCards,
@@ -766,7 +829,6 @@ export async function getRecordsForUser(ownerUserId, { organizationId, tenantCon
     listBootstrapShipmentsFromRepository(pool, ownerUserId, userOrganizationId),
     listTasks({ organizationId: userOrganizationId, includeAll: true }),
     listDocuments({ organizationId: userOrganizationId, includeArchived: true }),
-    listComplianceMeetings({ organizationId: userOrganizationId, includeArchived: true }),
     QUOTATIONS_UI_SURFACE_ENABLED
       ? listQuotations({
           organizationId: userOrganizationId,
@@ -785,7 +847,6 @@ export async function getRecordsForUser(ownerUserId, { organizationId, tenantCon
     shipments,
     tasks,
     documents,
-    appointments,
     quotes,
     shipmentSteps,
     commercialCards,
@@ -816,35 +877,58 @@ export async function replaceRecordsForUser(ownerUserId, recordsByCollection, { 
 
     let total = 0;
     for (const [collection, records] of entries) {
+      const normalizedCollection = String(collection).toLowerCase();
       if (
-        collection === "notifications" ||
-        collection === "customers" ||
-        collection === "channels" ||
-        collection === "messages" ||
-        (!QUOTATIONS_UI_SURFACE_ENABLED && collection === "quotes")
+        normalizedCollection === "notifications" ||
+        normalizedCollection === "customers" ||
+        normalizedCollection === "channels" ||
+        normalizedCollection === "messages" ||
+        RETIRED_COMPATIBILITY_COLLECTIONS.has(normalizedCollection) ||
+        (!QUOTATIONS_UI_SURFACE_ENABLED && normalizedCollection === "quotes")
       ) {
         // Notifications are canonical in the notifications table; the compatibility
         // bridge must not overwrite real read state or resurrect seed/demo rows.
         // Customers are canonical and may be privacy-sanitized in bootstrap payloads.
         // Live chat is canonical in chat_* tables and must not be reseeded from
         // legacy channels/messages collections.
+        // Retired cheque/appointment payloads are ignored so old clients cannot
+        // recreate compatibility data or invoke removed canonical feature code.
         // Quotations are temporarily hidden from the UI and must be managed only
         // through the canonical quotation API while the UI surface is disabled.
         continue;
       }
+      const acceptedRecords = records.filter((record) => !isRetiredCompatibilityRow({ collection, data: record }));
+      if (records.length > 0 && acceptedRecords.length === 0) {
+        // A payload made entirely of retired tombstones is a no-op. In
+        // particular, it must not clear unrelated deleted-item history.
+        continue;
+      }
       const uniqueRecords = Array.from(
-        records
+        acceptedRecords
           .reduce((items, record, index) => {
-            const itemId = record?.id || `${collection}-${index}`;
-            items.set(itemId, { itemId, record });
+            const sanitizedRecord = sanitizeCompatibilityData(collection, record);
+            const itemId = sanitizedRecord?.id || `${collection}-${index}`;
+            items.set(itemId, { itemId, record: sanitizedRecord });
             return items;
           }, new Map())
           .values()
       );
-      await client.query(
-        "DELETE FROM user_records WHERE owner_user_id = $1 AND collection = $2",
-        [ownerUserId, collection]
-      );
+      if (normalizedCollection === "deleteditems") {
+        await client.query(
+          `DELETE FROM user_records
+           WHERE owner_user_id = $1
+             AND collection = $2
+             AND UPPER(COALESCE(data->>'entityType', data->>'entity_type', '')) NOT IN (
+               'CHEQUE', 'APPOINTMENT', 'COMPLIANCE_MEETING'
+             )`,
+          [ownerUserId, collection]
+        );
+      } else {
+        await client.query(
+          "DELETE FROM user_records WHERE owner_user_id = $1 AND collection = $2",
+          [ownerUserId, collection]
+        );
+      }
 
       for (const { itemId, record } of uniqueRecords) {
         await client.query(
@@ -854,7 +938,10 @@ export async function replaceRecordsForUser(ownerUserId, recordsByCollection, { 
            DO UPDATE SET
              organization_id = EXCLUDED.organization_id,
              data = EXCLUDED.data,
-             updated_at = NOW()`,
+             updated_at = NOW()
+           WHERE UPPER(COALESCE(user_records.data->>'entityType', user_records.data->>'entity_type', '')) NOT IN (
+             'CHEQUE', 'APPOINTMENT', 'COMPLIANCE_MEETING'
+           )`,
           [ownerUserId, ownerOrganizationId, collection, itemId, JSON.stringify(record)]
         );
         total += 1;
@@ -966,7 +1053,7 @@ export async function getSessionByToken(token) {
       id: row.id,
       name: row.name,
       email: row.email,
-      role: row.role,
+      role: normalizeRetiredRole(row.role),
       avatar: row.avatar,
       is_online: row.is_online,
       department: row.department,
@@ -980,7 +1067,7 @@ export async function getSessionByToken(token) {
       organization_id: row.organization_id,
       organizationId: row.organization_id,
       membershipId: row.organization_id ? `${row.organization_id}:${row.id}` : null,
-      membershipRole: row.membership_role,
+      membershipRole: String(row.membership_role || "").toUpperCase() === "COMPLIANCE_STAFF" ? "member" : row.membership_role,
       membershipStatus: row.membership_status,
       organizationStatus: row.organization_status,
       organizationName: row.organization_name,
@@ -1047,7 +1134,9 @@ export async function updateUserProfile(userId, updates) {
       allowed.bio || null,
     ]
   );
-  return result.rows[0] || null;
+  const user = result.rows[0] || null;
+  if (user) user.role = normalizeRetiredRole(user.role);
+  return user;
 }
 
 export async function updateUserPassword(userId, passwordHash, { organizationId } = {}) {
@@ -1073,7 +1162,9 @@ export async function updateUserSecurity(userId, updates) {
                phone, location, bio, two_factor_enabled, notification_preferences`,
     [userId, updates.twoFactorEnabled]
   );
-  return result.rows[0] || null;
+  const user = result.rows[0] || null;
+  if (user) user.role = normalizeRetiredRole(user.role);
+  return user;
 }
 
 export async function updateUserNotificationPreferences(userId, preferences) {
@@ -1086,7 +1177,9 @@ export async function updateUserNotificationPreferences(userId, preferences) {
                phone, location, bio, two_factor_enabled, notification_preferences`,
     [userId, JSON.stringify(preferences || {})]
   );
-  return result.rows[0] || null;
+  const user = result.rows[0] || null;
+  if (user) user.role = normalizeRetiredRole(user.role);
+  return user;
 }
 
 export async function deleteSessionByToken(token) {
@@ -1112,6 +1205,7 @@ export async function getUserPermissions(userId) {
        JOIN permissions p ON p.id = up.permission_id
        WHERE up.user_id = $1
      ) granted_permissions
+     WHERE LOWER(key) NOT IN ('cheques.manage', 'compliance.manage')
      ORDER BY key`,
     [userId]
   );
@@ -1134,6 +1228,7 @@ async function getUserPermissionsWithClient(queryable, userId) {
        JOIN permissions p ON p.id = up.permission_id
        WHERE up.user_id = $1
      ) granted_permissions
+     WHERE LOWER(key) NOT IN ('cheques.manage', 'compliance.manage')
      ORDER BY key`,
     [userId]
   );
@@ -1141,6 +1236,12 @@ async function getUserPermissionsWithClient(queryable, userId) {
 }
 
 export async function grantUserPermission(userId, permissionKey, { grantedById, reason, audit } = {}) {
+  if (RETIRED_PERMISSION_KEYS.has(String(permissionKey || "").toLowerCase())) {
+    const error = new Error("Permission was not found.");
+    error.statusCode = 404;
+    error.code = "PERMISSION_NOT_FOUND";
+    throw error;
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -1193,6 +1294,12 @@ export async function grantUserPermission(userId, permissionKey, { grantedById, 
 }
 
 export async function revokeUserPermission(userId, permissionKey, { audit } = {}) {
+  if (RETIRED_PERMISSION_KEYS.has(String(permissionKey || "").toLowerCase())) {
+    const error = new Error("Permission was not found.");
+    error.statusCode = 404;
+    error.code = "PERMISSION_NOT_FOUND";
+    throw error;
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -1873,6 +1980,8 @@ function sanitizeDocumentAuditSnapshot(value) {
 function toUiTask(row) {
   if (!row) return null;
   const legacy = row.legacy_data || {};
+  const sourceType = row.source_type || legacy.sourceType || "MANUAL";
+  const retiredSource = [row.source_type, legacy.sourceType, legacy.source_type].some(isRetiredTaskSource);
   return {
     id: row.id,
     organizationId: row.organization_id || legacy.organizationId || undefined,
@@ -1893,8 +2002,8 @@ function toUiTask(row) {
     createdAt: row.created_at || legacy.createdAt || new Date().toISOString(),
     completedAt: row.completed_at || legacy.completedAt || undefined,
     completedByUserId: row.completed_by_user_id || legacy.completedByUserId || undefined,
-    sourceType: row.source_type || legacy.sourceType || "MANUAL",
-    sourceId: row.source_id || legacy.sourceId || undefined,
+    sourceType: retiredSource ? "MANUAL" : sourceType,
+    sourceId: retiredSource ? undefined : row.source_id || legacy.sourceId || undefined,
     workflowInstanceId: row.workflow_instance_id || legacy.workflowInstanceId || undefined,
     workflowStepCode: row.workflow_step_code || legacy.workflowStepCode || undefined,
     workflowBlockerId: row.workflow_blocker_id || legacy.workflowBlockerId || undefined,
@@ -1908,7 +2017,7 @@ function toUiUser(row) {
     id: row.id,
     name: row.name,
     email: row.email,
-    role: row.role,
+    role: normalizeRetiredRole(row.role),
     avatar: row.avatar || undefined,
     isOnline: Boolean(row.is_online),
     phone: row.phone || undefined,
@@ -1932,14 +2041,6 @@ function toUiCustomer(row, options = {}) {
 
 function toUiQuote(row, { includeCustomerPrivateDetails = true } = {}) {
   return toUiQuoteFromRepository(row, { includeCustomerPrivateDetails });
-}
-
-function toUiCheque(row) {
-  return toUiChequeFromRepository(row);
-}
-
-function toUiAppointment(row, documents = []) {
-  return toUiAppointmentFromRepository(row, documents);
 }
 
 async function syncDocumentUserRecord(client, ownerUserId, documentRow) {
@@ -1988,41 +2089,6 @@ async function syncNotificationUserRecord(client, userId, notificationRow) {
        data = EXCLUDED.data,
        updated_at = NOW()`,
     [userId, notificationRow.id, JSON.stringify(uiNotification)]
-  );
-}
-
-async function syncChequeUserRecord(client, ownerUserId, chequeRow) {
-  if (!ownerUserId || !chequeRow) return;
-  const uiCheque = toUiCheque(chequeRow);
-  await client.query(
-    `INSERT INTO user_records (owner_user_id, organization_id, collection, item_id, data, updated_at)
-     VALUES ($1, $2, 'cheques', $3, $4::jsonb, NOW())
-     ON CONFLICT (owner_user_id, collection, item_id) DO UPDATE SET
-       organization_id = EXCLUDED.organization_id,
-       data = EXCLUDED.data,
-       updated_at = NOW()`,
-    [ownerUserId, chequeRow.organization_id || null, chequeRow.id, JSON.stringify(uiCheque)]
-  );
-}
-
-async function syncMeetingUserRecord(client, ownerUserId, meetingRow) {
-  if (!ownerUserId || !meetingRow) return;
-  const docs = await client.query(
-    `SELECT *
-     FROM meeting_required_documents
-     WHERE meeting_id = $1
-     ORDER BY created_at ASC`,
-    [meetingRow.id]
-  );
-  const uiMeeting = toUiAppointment(meetingRow, docs.rows);
-  await client.query(
-    `INSERT INTO user_records (owner_user_id, organization_id, collection, item_id, data, updated_at)
-     VALUES ($1, $2, 'appointments', $3, $4::jsonb, NOW())
-     ON CONFLICT (owner_user_id, collection, item_id) DO UPDATE SET
-       organization_id = EXCLUDED.organization_id,
-       data = EXCLUDED.data,
-       updated_at = NOW()`,
-    [ownerUserId, meetingRow.organization_id || null, meetingRow.id, JSON.stringify(uiMeeting)]
   );
 }
 
@@ -3191,7 +3257,7 @@ export async function listOrganizationMembers({ organizationId, includeInactive 
     userId: row.id,
     displayName: row.name,
     email: row.email,
-    roleName: row.role,
+    roleName: normalizeRetiredRole(row.role),
     active: row.status === "active",
   }));
 }
@@ -3500,454 +3566,13 @@ export async function listShipmentSteps(shipmentId, ownerUserId, { organizationI
   return result.rows.map((row) => row.data);
 }
 
-function normalizeChequeStatus(status) {
-  const value = String(status || "ACTIVE").toUpperCase();
-  return ["ACTIVE", "CLEARED", "RETURNED", "ARCHIVED"].includes(value) ? value : "ACTIVE";
-}
-
-function normalizeAppointmentStatus(status) {
-  const value = String(status || "SCHEDULED").toUpperCase();
-  return ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "CANCELLED", "FOLLOW_UP_REQUIRED"].includes(value)
-    ? value
-    : "SCHEDULED";
-}
-
-export async function listCheques({ ownerUserId, organizationId, includeArchived = false } = {}) {
-  return listChequesFromRepository(pool, { ownerUserId, organizationId, includeArchived });
-}
-
-export async function getChequeRecord(id, { organizationId } = {}) {
-  return getChequeRecordFromRepository(pool, id, { organizationId });
-}
-
-export async function createChequeRecord({ ownerUserId, actorUserId, organizationId, tenantContext, cheque }) {
-  const scopedOrganizationId = tenantContext
-    ? organizationIdFromTenantContext(tenantContext, "createChequeRecord")
-    : requireOrganizationScope(organizationId, "createChequeRecord");
-  const client = await pool.connect();
-  const id = crypto.randomUUID();
-  try {
-    await client.query("BEGIN");
-    const owner = await client.query("SELECT organization_id FROM app_users WHERE id = $1", [ownerUserId]);
-    if (owner.rows[0]?.organization_id !== scopedOrganizationId) {
-      await client.query("ROLLBACK");
-      const error = new Error("Cheque owner does not belong to the authenticated organization.");
-      error.code = "TENANT_SCOPE_REQUIRED";
-      error.statusCode = 403;
-      throw error;
-    }
-    const result = await client.query(
-      `INSERT INTO cheques (
-         id, organization_id, owner_user_id, bank_name, cheque_number, amount, due_date, location,
-         receiver, status, description, legacy_data, created_by_id, archived_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)
-       RETURNING *`,
-      [
-        id,
-        scopedOrganizationId,
-        ownerUserId,
-        String(cheque.bankName || "").trim(),
-        String(cheque.chequeNumber || "").trim(),
-        Number(cheque.amount || 0),
-        cheque.dueDate || null,
-        cheque.location || null,
-        cheque.receiver || null,
-        normalizeChequeStatus(cheque.status),
-        cheque.description || null,
-        JSON.stringify(cheque),
-        actorUserId || ownerUserId,
-        normalizeChequeStatus(cheque.status) === "ARCHIVED" ? new Date() : null,
-      ]
-    );
-    await syncChequeUserRecord(client, ownerUserId, result.rows[0]);
-    await client.query("COMMIT");
-    const savedCheque = result.rows[0];
-    return savedCheque;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function updateChequeRecord(id, updates = {}, { organizationId } = {}) {
-  const client = await pool.connect();
-  const scopedOrganizationId = requireOrganizationScope(organizationId, "updateChequeRecord");
-  try {
-    await client.query("BEGIN");
-    const beforeResult = await client.query(
-      "SELECT * FROM cheques WHERE id = $1 AND organization_id = $2",
-      [id, scopedOrganizationId]
-    );
-    const before = beforeResult.rows[0] || null;
-    if (!before) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const status = updates.status === undefined ? before.status : normalizeChequeStatus(updates.status);
-    const legacy = { ...(before.legacy_data || {}), ...updates, status };
-    const result = await client.query(
-      `UPDATE cheques
-       SET bank_name = COALESCE($2, bank_name),
-           cheque_number = COALESCE($3, cheque_number),
-           amount = COALESCE($4, amount),
-           due_date = $5,
-           location = $6,
-           receiver = $7,
-           status = $8,
-           description = $9,
-           legacy_data = $10::jsonb,
-           archived_at = CASE WHEN $8 = 'ARCHIVED' THEN COALESCE(archived_at, NOW()) ELSE archived_at END,
-           updated_at = NOW()
-        WHERE id = $1 AND organization_id = $11
-        RETURNING *`,
-      [
-        id,
-        updates.bankName === undefined ? null : String(updates.bankName || "").trim(),
-        updates.chequeNumber === undefined ? null : String(updates.chequeNumber || "").trim(),
-        updates.amount === undefined ? null : Number(updates.amount || 0),
-        updates.dueDate === undefined ? before.due_date : updates.dueDate || null,
-        updates.location === undefined ? before.location : updates.location || null,
-        updates.receiver === undefined ? before.receiver : updates.receiver || null,
-        status,
-        updates.description === undefined ? before.description : updates.description || null,
-        JSON.stringify(legacy),
-        scopedOrganizationId,
-      ]
-    );
-    await syncChequeUserRecord(client, result.rows[0].owner_user_id, result.rows[0]);
-    await client.query("COMMIT");
-    const payload = { before, after: result.rows[0] };
-    return payload;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function archiveChequeRecord(id, { organizationId } = {}) {
-  return updateChequeRecord(id, { status: "ARCHIVED" }, { organizationId });
-}
-
-export async function listDueSoonCheques({ ownerUserId, organizationId, days = 7 } = {}) {
-  const cheques = await listCheques({ ownerUserId, organizationId });
-  const now = Date.now();
-  const horizon = now + Number(days || 7) * 24 * 60 * 60 * 1000;
-  return cheques.filter((cheque) => {
-    if (!["ACTIVE", "RETURNED"].includes(cheque.status) || !cheque.dueDate) return false;
-    const parsed = parseOperationalDate(cheque.dueDate);
-    return !parsed || parsed.getTime() <= horizon;
-  });
-}
-
-export async function listComplianceMeetings({ ownerUserId, assignedToId, organizationId, includeArchived = false } = {}) {
-  return listComplianceMeetingsFromRepository(pool, {
-    ownerUserId,
-    assignedToId,
-    organizationId,
-    includeArchived,
-  });
-}
-
-export async function getComplianceMeetingRecord(id, { organizationId } = {}) {
-  return getComplianceMeetingRecordFromRepository(pool, id, { organizationId });
-}
-
-async function replaceMeetingDocuments(client, meetingId, requiredDocuments = [], organizationId) {
-  const scopedOrganizationId = requireOrganizationScope(organizationId, "replaceMeetingDocuments");
-  await client.query("DELETE FROM meeting_required_documents WHERE meeting_id = $1 AND organization_id = $2", [meetingId, scopedOrganizationId]);
-  for (const doc of requiredDocuments) {
-    const documentId = doc.id ? `${meetingId}:${doc.id}` : crypto.randomUUID();
-    await client.query(
-      `INSERT INTO meeting_required_documents (
-         id, organization_id, meeting_id, name, required, completed, file_name, legacy_data
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-      [
-        documentId,
-        scopedOrganizationId,
-        meetingId,
-        doc.name || "Document",
-        doc.required !== false,
-        Boolean(doc.completed),
-        doc.fileName || null,
-        JSON.stringify(doc),
-      ]
-    );
-  }
-}
-
-export async function createComplianceMeetingRecord({ ownerUserId, actorUser, organizationId, tenantContext, meeting }) {
-  const scopedOrganizationId = tenantContext
-    ? organizationIdFromTenantContext(tenantContext, "createComplianceMeetingRecord")
-    : requireOrganizationScope(organizationId, "createComplianceMeetingRecord");
-  const client = await pool.connect();
-  const id = crypto.randomUUID();
-  try {
-    await client.query("BEGIN");
-    const owner = await client.query("SELECT organization_id FROM app_users WHERE id = $1", [ownerUserId]);
-    if (owner.rows[0]?.organization_id !== scopedOrganizationId) {
-      await client.query("ROLLBACK");
-      const error = new Error("Compliance meeting owner does not belong to the authenticated organization.");
-      error.code = "TENANT_SCOPE_REQUIRED";
-      error.statusCode = 403;
-      throw error;
-    }
-    const result = await client.query(
-      `INSERT INTO compliance_meetings (
-         id, organization_id, owner_user_id, title, organization_name, meeting_at, location, status,
-         assigned_to_id, assigned_to_name, description, outcome, next_action_items,
-         reminder_sent, legacy_data, created_by_id
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16)
-       RETURNING *`,
-      [
-        id,
-        scopedOrganizationId,
-        ownerUserId,
-        meeting.purpose || meeting.title || "Compliance meeting",
-        meeting.departmentName || meeting.organizationName || null,
-        meeting.dateTime,
-        meeting.location || null,
-        normalizeAppointmentStatus(meeting.status),
-        meeting.assignedPersonId || null,
-        meeting.assignedPersonName || null,
-        meeting.description || null,
-        meeting.outcome || null,
-        meeting.nextActionItems || null,
-        Boolean(meeting.reminderSent),
-        JSON.stringify(meeting),
-        actorUser?.id || ownerUserId,
-      ]
-    );
-    await replaceMeetingDocuments(client, id, meeting.requiredDocuments || [], scopedOrganizationId);
-    await syncMeetingUserRecord(client, ownerUserId, result.rows[0]);
-    await client.query("COMMIT");
-    return result.rows[0];
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function updateComplianceMeetingRecord(id, updates = {}, { organizationId } = {}) {
-  const client = await pool.connect();
-  const scopedOrganizationId = requireOrganizationScope(organizationId, "updateComplianceMeetingRecord");
-  try {
-    await client.query("BEGIN");
-    const beforeResult = await client.query(
-      "SELECT * FROM compliance_meetings WHERE id = $1 AND organization_id = $2",
-      [id, scopedOrganizationId]
-    );
-    const before = beforeResult.rows[0] || null;
-    if (!before) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const legacy = { ...(before.legacy_data || {}), ...updates };
-    const result = await client.query(
-      `UPDATE compliance_meetings
-       SET title = COALESCE($2, title),
-           organization_name = $3,
-           meeting_at = COALESCE($4, meeting_at),
-           location = $5,
-           status = $6,
-           assigned_to_id = $7,
-           assigned_to_name = $8,
-           description = $9,
-           outcome = $10,
-           next_action_items = $11,
-           reminder_sent = $12,
-           legacy_data = $13::jsonb,
-           archived_at = CASE WHEN $6 = 'ARCHIVED' THEN COALESCE(archived_at, NOW()) ELSE archived_at END,
-           updated_at = NOW()
-        WHERE id = $1 AND organization_id = $14
-        RETURNING *`,
-      [
-        id,
-        updates.purpose || updates.title || null,
-        updates.departmentName === undefined ? before.organization_name : updates.departmentName || null,
-        updates.dateTime || updates.meetingAt || null,
-        updates.location === undefined ? before.location : updates.location || null,
-        updates.status === undefined ? before.status : normalizeAppointmentStatus(updates.status),
-        updates.assignedPersonId === undefined ? before.assigned_to_id : updates.assignedPersonId || null,
-        updates.assignedPersonName === undefined ? before.assigned_to_name : updates.assignedPersonName || null,
-        updates.description === undefined ? before.description : updates.description || null,
-        updates.outcome === undefined ? before.outcome : updates.outcome || null,
-        updates.nextActionItems === undefined ? before.next_action_items : updates.nextActionItems || null,
-        updates.reminderSent === undefined ? before.reminder_sent : Boolean(updates.reminderSent),
-        JSON.stringify(legacy),
-        scopedOrganizationId,
-      ]
-    );
-    if (Array.isArray(updates.requiredDocuments)) {
-      await replaceMeetingDocuments(client, id, updates.requiredDocuments, scopedOrganizationId);
-    }
-    await syncMeetingUserRecord(client, result.rows[0].owner_user_id, result.rows[0]);
-    await client.query("COMMIT");
-    return { before, after: result.rows[0] };
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function archiveComplianceMeetingRecord(id, { organizationId } = {}) {
-  const client = await pool.connect();
-  const scopedOrganizationId = requireOrganizationScope(organizationId, "archiveComplianceMeetingRecord");
-  try {
-    await client.query("BEGIN");
-    const beforeResult = await client.query(
-      "SELECT * FROM compliance_meetings WHERE id = $1 AND organization_id = $2",
-      [id, scopedOrganizationId]
-    );
-    const before = beforeResult.rows[0] || null;
-    if (!before) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const result = await client.query(
-      `UPDATE compliance_meetings
-       SET status = 'COMPLETED',
-           archived_at = COALESCE(archived_at, NOW()),
-           updated_at = NOW()
-        WHERE id = $1 AND organization_id = $2
-        RETURNING *`,
-      [id, scopedOrganizationId]
-    );
-    await syncMeetingUserRecord(client, result.rows[0].owner_user_id, result.rows[0]);
-    await client.query("COMMIT");
-    return { before, after: result.rows[0] };
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function upsertMeetingRequiredDocument(meetingId, document = {}, { organizationId } = {}) {
-  const client = await pool.connect();
-  const scopedOrganizationId = requireOrganizationScope(organizationId, "upsertMeetingRequiredDocument");
-  try {
-    await client.query("BEGIN");
-    const meeting = await getComplianceMeetingRecord(meetingId, { organizationId: scopedOrganizationId });
-    if (!meeting) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const id = document.id || crypto.randomUUID();
-    const result = await client.query(
-      `INSERT INTO meeting_required_documents (
-         id, organization_id, meeting_id, name, required, completed, file_name, legacy_data, updated_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         organization_id = EXCLUDED.organization_id,
-         name = EXCLUDED.name,
-         required = EXCLUDED.required,
-         completed = EXCLUDED.completed,
-         file_name = EXCLUDED.file_name,
-         legacy_data = EXCLUDED.legacy_data,
-         updated_at = NOW()
-       RETURNING *`,
-      [
-        id,
-        scopedOrganizationId,
-        meetingId,
-        document.name || "Document",
-        document.required !== false,
-        Boolean(document.completed),
-        document.fileName || null,
-        JSON.stringify(document),
-      ]
-    );
-    await syncMeetingUserRecord(client, meeting.owner_user_id, meeting);
-    await client.query("COMMIT");
-    return result.rows[0];
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
-export async function updateMeetingRequiredDocument(meetingId, documentId, updates = {}, { organizationId } = {}) {
-  const client = await pool.connect();
-  const scopedOrganizationId = requireOrganizationScope(organizationId, "updateMeetingRequiredDocument");
-  try {
-    await client.query("BEGIN");
-    const meetingResult = await client.query(
-      "SELECT * FROM compliance_meetings WHERE id = $1 AND organization_id = $2",
-      [meetingId, scopedOrganizationId]
-    );
-    const meeting = meetingResult.rows[0] || null;
-    if (!meeting) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const beforeResult = await client.query(
-      "SELECT * FROM meeting_required_documents WHERE id = $1 AND meeting_id = $2 AND organization_id = $3",
-      [documentId, meetingId, scopedOrganizationId]
-    );
-    const before = beforeResult.rows[0] || null;
-    if (!before) {
-      await client.query("ROLLBACK");
-      return null;
-    }
-    const legacy = { ...(before.legacy_data || {}), ...updates };
-    const result = await client.query(
-      `UPDATE meeting_required_documents
-       SET name = COALESCE($3, name),
-           required = $4,
-           completed = $5,
-           file_name = $6,
-           legacy_data = $7::jsonb,
-           updated_at = NOW()
-        WHERE id = $1 AND meeting_id = $2 AND organization_id = $8
-        RETURNING *`,
-      [
-        documentId,
-        meetingId,
-        updates.name || null,
-        updates.required === undefined ? before.required : Boolean(updates.required),
-        updates.completed === undefined ? before.completed : Boolean(updates.completed),
-        updates.fileName === undefined ? before.file_name : updates.fileName || null,
-        JSON.stringify(legacy),
-        scopedOrganizationId,
-      ]
-    );
-    await syncMeetingUserRecord(client, meeting.owner_user_id, meeting);
-    await client.query("COMMIT");
-    return { before, after: result.rows[0] };
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 export async function getDashboardData(user, permissions = []) {
   const canViewAllTasks = permissions.includes("tasks.view_all");
-  const canViewCompliance = permissions.includes("compliance.manage");
   const canViewQuotations = QUOTATIONS_UI_SURFACE_ENABLED && permissions.includes("quotations.manage");
-  const canUseCheques = permissions.includes("cheques.manage");
-  const canViewOrganizationCheques = canUseCheques && (user.role === "CEO" || user.role === "MANAGER");
   const organizationId = user.organizationId || user.organization_id;
 
   const orgParam = organizationId || null;
   const taskVisibilitySql = "AND ($3::boolean OR t.owner_user_id = $2 OR t.assigned_to_id = $2 OR t.assigned_by_id = $2)";
-  const chequeVisibilitySql = "AND ($3::boolean OR ($4::boolean AND owner_user_id = $2))";
 
   const [
     shipmentSummaryResult,
@@ -3956,13 +3581,10 @@ export async function getDashboardData(user, permissions = []) {
     taskSummaryResult,
     myTasksResult,
     documentCountResult,
-    chequeSummaryResult,
-    meetingRows,
     quotationSummaryResult,
     notificationResult,
     changeResult,
     usersResult,
-    dueSoonCheques,
   ] = await Promise.all([
     pool.query(
       `SELECT
@@ -4026,16 +3648,6 @@ export async function getDashboardData(user, permissions = []) {
           AND ($1::text IS NULL OR organization_id = $1)`,
       [orgParam]
     ),
-    pool.query(
-      `SELECT
-         COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'ACTIVE')::int AS active_cheques,
-         COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'RETURNED')::int AS returned_cheques
-        FROM cheques
-        WHERE ($1::text IS NULL OR organization_id = $1)
-        ${chequeVisibilitySql}`,
-      [orgParam, user.id, canViewOrganizationCheques, canUseCheques]
-    ),
-    listComplianceMeetings(canViewCompliance ? { organizationId } : { organizationId, assignedToId: user.id }),
     canViewQuotations
       ? pool.query(
           `SELECT COUNT(*) FILTER (WHERE archived_at IS NULL AND status = 'PENDING')::int AS active_quotations
@@ -4045,9 +3657,12 @@ export async function getDashboardData(user, permissions = []) {
         )
       : Promise.resolve({ rows: [{ active_quotations: 0 }] }),
     pool.query(
-      `SELECT * FROM notifications
+       `SELECT * FROM notifications
        WHERE user_id = $1 AND ($2::text IS NULL OR organization_id = $2) AND read_at IS NULL
          AND id <> ALL($3::text[])
+         AND UPPER(COALESCE(source_type, '')) NOT IN ('CHEQUE', 'APPOINTMENT', 'COMPLIANCE_MEETING')
+         AND COALESCE(source_id, '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
+         AND COALESCE(legacy_data->>'link', '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
        ORDER BY created_at DESC
        LIMIT 20`,
       [user.id, orgParam, ["n1", "n2", "n3", "n4"]]
@@ -4068,9 +3683,6 @@ export async function getDashboardData(user, permissions = []) {
        ORDER BY is_online DESC, name ASC`,
       [orgParam]
     ),
-    canUseCheques
-      ? listDueSoonCheques({ organizationId, ownerUserId: canViewOrganizationCheques ? undefined : user.id })
-      : Promise.resolve([]),
   ]);
 
   const toDashboardShipment = (row) => ({
@@ -4090,40 +3702,15 @@ export async function getDashboardData(user, permissions = []) {
   const myTasks = myTasksResult.rows.map(toUiTask);
   const shipmentSummary = shipmentSummaryResult.rows[0] || {};
   const taskSummary = taskSummaryResult.rows[0] || {};
-  const chequeSummary = chequeSummaryResult.rows[0] || {};
   const quotationSummary = quotationSummaryResult.rows[0] || {};
-  const upcomingMeetings = meetingRows.filter((meeting) => !["COMPLETED", "CANCELLED"].includes(meeting.status));
-  const missingMeetingDocs = meetingRows.flatMap((meeting) =>
-    (meeting.requiredDocuments || [])
-      .filter((doc) => doc.required && !doc.completed)
-      .map((doc) => ({ meetingId: meeting.id, meetingTitle: meeting.purpose, documentName: doc.name }))
-  );
-  const alerts = [
-    ...notificationResult.rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      message: row.body || "",
-      type: row.type || "INFO",
-      link: row.legacy_data?.link || "/dashboard",
-      createdAt: row.created_at,
-    })),
-    ...dueSoonCheques.map((cheque) => ({
-      id: `cheque-${cheque.id}`,
-      title: cheque.status === "RETURNED" ? "Cheque returned" : "Cheque due soon",
-      message: `${cheque.bankName} - ${cheque.chequeNumber}`,
-      type: cheque.status === "RETURNED" ? "URGENT" : "WARNING",
-      link: "/cheques",
-      createdAt: cheque.createdAt,
-    })),
-    ...missingMeetingDocs.slice(0, 8).map((item) => ({
-      id: `meeting-doc-${item.meetingId}-${item.documentName}`,
-      title: "Missing compliance document",
-      message: `${item.meetingTitle}: ${item.documentName}`,
-      type: "WARNING",
-      link: "/compliance-meetings",
-      createdAt: new Date().toISOString(),
-    })),
-  ];
+  const alerts = notificationResult.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    message: row.body || "",
+    type: row.type || "INFO",
+    link: row.legacy_data?.link || "/dashboard",
+    createdAt: row.created_at,
+  }));
 
   return {
     summary: {
@@ -4132,11 +3719,6 @@ export async function getDashboardData(user, permissions = []) {
       openTasks: Number(taskSummary.open_tasks || 0),
       completedTasks: Number(taskSummary.completed_tasks || 0),
       documents: Number(documentCountResult.rows[0]?.documents || 0),
-      activeCheques: Number(chequeSummary.active_cheques || 0),
-      returnedCheques: Number(chequeSummary.returned_cheques || 0),
-      dueSoonCheques: dueSoonCheques.length,
-      upcomingMeetings: upcomingMeetings.length,
-      missingMeetingDocuments: missingMeetingDocs.length,
       activeQuotations: Number(quotationSummary.active_quotations || 0),
     },
     latestShipments,
@@ -4145,7 +3727,7 @@ export async function getDashboardData(user, permissions = []) {
     alerts,
     management: {
       recentChanges: changeResult.rows,
-      users: usersResult.rows,
+      users: usersResult.rows.map((row) => ({ ...row, role: normalizeRetiredRole(row.role) })),
       onlineUsers: usersResult.rows.filter((row) => row.is_online).length,
       recentlyCompletedTasks: [],
     },
@@ -4153,8 +3735,14 @@ export async function getDashboardData(user, permissions = []) {
 }
 
 export async function listRoles() {
-  const result = await pool.query("SELECT id, name, description FROM roles ORDER BY name ASC");
-  return result.rows;
+  const result = await pool.query(
+    "SELECT id, name, description FROM roles WHERE UPPER(name) <> 'COMPLIANCE_STAFF' ORDER BY name ASC"
+  );
+  return result.rows.map((row) => (
+    String(row.name || "").toUpperCase() === "FINANCE"
+      ? { ...row, description: "Finance access" }
+      : row
+  ));
 }
 
 function slugifyOrganizationName(name = "company") {
@@ -4169,14 +3757,17 @@ function slugifyOrganizationName(name = "company") {
 
 function toUiPlan(row) {
   if (!row) return null;
+  const description = row.id === "business" && row.description === RETIRED_BUSINESS_PLAN_DESCRIPTION
+    ? CURRENT_BUSINESS_PLAN_DESCRIPTION
+    : row.description || "";
   return {
     id: row.id,
     name: row.name,
-    description: row.description || "",
+    description,
     monthlyPriceIrr: Number(row.monthly_price_irr || 0),
     annualPriceIrr: Number(row.annual_price_irr || 0),
     limits: row.limits || {},
-    features: row.features || {},
+    features: stripRetiredSubscriptionKeys(row.features),
     isPublic: Boolean(row.is_public),
     sortOrder: row.sort_order || 0,
   };
@@ -4347,10 +3938,10 @@ export async function getOrganizationForUser(userId) {
 }
 
 function mergeSubscriptionLimits(planLimits = {}, planFeatures = {}, limitsOverride = {}) {
-  const override = limitsOverride || {};
-  const featureKeys = ["chat", "cheques", "compliance", "quotations", "archive"];
+  const override = stripRetiredSubscriptionKeys(limitsOverride);
+  const featureKeys = ["chat", "quotations", "archive"];
   const limits = { ...(planLimits || {}) };
-  const features = { ...(planFeatures || {}) };
+  const features = stripRetiredSubscriptionKeys(planFeatures);
   for (const [key, value] of Object.entries(override)) {
     if (featureKeys.includes(key)) {
       features[key] = Boolean(value);
@@ -4377,7 +3968,7 @@ export async function getEffectiveSubscriptionLimits(organizationId, queryable =
   const effective = mergeSubscriptionLimits(row.plan_limits, row.plan_features, row.limits_override);
   return {
     ...effective,
-    override: row.limits_override || {},
+    override: stripRetiredSubscriptionKeys(row.limits_override),
     plan: { id: row.plan_id, name: row.plan_name },
     subscription: {
       id: row.id,
@@ -4387,62 +3978,11 @@ export async function getEffectiveSubscriptionLimits(organizationId, queryable =
       billingCycle: row.billing_cycle,
       currentPeriodStart: row.current_period_start,
       currentPeriodEnd: row.current_period_end,
-      limitsOverride: row.limits_override || {},
+      limitsOverride: stripRetiredSubscriptionKeys(row.limits_override),
       effectiveLimits: effective.limits,
       effectiveFeatures: effective.features,
     },
   };
-}
-
-function jalaliToGregorian(jy, jm, jd) {
-  jy += 1595;
-  let days = -355668 + (365 * jy) + Math.floor(jy / 33) * 8 + Math.floor(((jy % 33) + 3) / 4) + jd;
-  days += jm < 7 ? (jm - 1) * 31 : ((jm - 7) * 30) + 186;
-  let gy = 400 * Math.floor(days / 146097);
-  days %= 146097;
-  if (days > 36524) {
-    gy += 100 * Math.floor(--days / 36524);
-    days %= 36524;
-    if (days >= 365) days += 1;
-  }
-  gy += 4 * Math.floor(days / 1461);
-  days %= 1461;
-  if (days > 365) {
-    gy += Math.floor((days - 1) / 365);
-    days = (days - 1) % 365;
-  }
-  let gd = days + 1;
-  const daysInMonth = [0, 31, ((gy % 4 === 0 && gy % 100 !== 0) || (gy % 400 === 0)) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  let gm = 1;
-  for (; gm <= 12 && gd > daysInMonth[gm]; gm += 1) gd -= daysInMonth[gm];
-  return { gy, gm, gd };
-}
-
-function parseOperationalDate(value) {
-  if (!value) return null;
-  const text = String(value).trim();
-  if (/[T\s]\d{1,2}:\d{2}.*(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) {
-    const absolute = new Date(text);
-    if (!Number.isNaN(absolute.valueOf())) return absolute;
-  }
-  const match = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2}))?/);
-  if (match) {
-    let year = Number(match[1]);
-    let month = Number(match[2]);
-    let day = Number(match[3]);
-    const hour = Number(match[4] || 0);
-    const minute = Number(match[5] || 0);
-    if (year < 1700) {
-      const converted = jalaliToGregorian(year, month, day);
-      year = converted.gy;
-      month = converted.gm;
-      day = converted.gd;
-    }
-    const parsed = new Date(year, month - 1, day, hour, minute);
-    return Number.isNaN(parsed.valueOf()) ? null : parsed;
-  }
-  const parsed = new Date(text);
-  return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
 export async function assertPlanAllowsUser(organizationId) {
@@ -4611,7 +4151,7 @@ export async function listOrganizations() {
     activeUserCount: Number(row.active_user_count || 0),
     subscriptionStatus: row.subscription_status,
     billingCycle: row.billing_cycle,
-    limitsOverride: row.limits_override || {},
+    limitsOverride: stripRetiredSubscriptionKeys(row.limits_override),
     createdAt: row.created_at,
   }));
 }
@@ -4812,7 +4352,7 @@ export async function updateOrganizationSubscription(organizationId, updates = {
     fields.push(`status = $${values.length}`);
   }
   if (updates.limitsOverride !== undefined) {
-    values.push(JSON.stringify(updates.limitsOverride || {}));
+    values.push(JSON.stringify(stripRetiredSubscriptionKeys(updates.limitsOverride)));
     fields.push(`limits_override = $${values.length}::jsonb`);
   }
   if (!fields.length) return getOrganizationSubscription(organizationId);
@@ -5272,7 +4812,7 @@ export async function createAppUserRecord({ actorUserId, user, passwordHash }) {
         user.name,
         user.email,
         passwordHash,
-        user.role || "OPERATIONS",
+        normalizeRetiredRole(user.role || "OPERATIONS"),
         user.avatar || null,
         user.department || null,
         user.status || "active",
@@ -5308,6 +4848,12 @@ export async function updateAppUserRecord(userId, updates, syncOwnerUserId, { or
     const beforeValues = [userId];
     const beforeOrganizationFilter = organizationId ? ` AND organization_id = $${beforeValues.push(organizationId)}` : "";
     const before = await client.query(`SELECT * FROM app_users WHERE id = $1 ${beforeOrganizationFilter}`, beforeValues);
+    const beforeRow = before.rows[0] || null;
+    const requestedRole = updates.role ? normalizeRetiredRole(updates.role) : null;
+    const roleUpdate = String(beforeRow?.role || "").toUpperCase() === "COMPLIANCE_STAFF"
+      && String(requestedRole || "").toUpperCase() === "OPERATIONS"
+      ? null
+      : requestedRole;
     const result = await client.query(
       `UPDATE app_users
        SET name = COALESCE($2, name),
@@ -5328,7 +4874,7 @@ export async function updateAppUserRecord(userId, updates, syncOwnerUserId, { or
         userId,
         updates.name || null,
         updates.email || null,
-        updates.role || null,
+        roleUpdate,
         updates.avatar || null,
         updates.department || null,
         updates.status || null,
@@ -5350,7 +4896,9 @@ export async function updateAppUserRecord(userId, updates, syncOwnerUserId, { or
       await syncUsersCollection(client, syncOwnerUserId);
     }
     await client.query("COMMIT");
-    return { before: before.rows[0] || null, after: result.rows[0] || null };
+    const after = result.rows[0] || null;
+    if (after) after.role = normalizeRetiredRole(after.role);
+    return { before: beforeRow, after };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -6027,8 +5575,6 @@ function archiveTitle(entityType, row) {
   const legacy = row?.legacy_data || {};
   if (entityType === "shipment") return row.shipment_code || legacy.trackingNumber || row.id;
   if (entityType === "document") return row.title || row.file_name || legacy.name || row.id;
-  if (entityType === "cheque") return row.cheque_number || legacy.chequeNumber || row.id;
-  if (entityType === "compliance_meeting") return row.title || legacy.purpose || row.id;
   if (entityType === "quotation") return row.quotation_number || legacy.id || row.id;
   if (entityType === "customer") return row.company_name || legacy.company || row.id;
   return row?.id || "Archived record";
@@ -6037,8 +5583,6 @@ function archiveTitle(entityType, row) {
 const archiveTables = {
   shipment: { table: "shipments", id: "id" },
   document: { table: "documents", id: "id" },
-  cheque: { table: "cheques", id: "id" },
-  compliance_meeting: { table: "compliance_meetings", id: "id" },
   quotation: { table: "quotations", id: "id" },
   customer: { table: "customers", id: "id" },
 };
@@ -6070,9 +5614,7 @@ export async function listArchiveRecords({ search = "", organizationId } = {}) {
         data:
           entityType === "quotation" ? toUiQuote(row) :
           entityType === "customer" ? toUiCustomer(row) :
-          entityType === "cheque" ? toUiCheque(row) :
           entityType === "document" ? toUiDocument(row) :
-          entityType === "compliance_meeting" ? toUiAppointment(row) :
           { id: row.id, ...(row.legacy_data || {}) },
       };
       records.push(item);
@@ -6149,8 +5691,6 @@ export async function restoreEntityRecord(entityType, entityId, { organizationId
   const statusReset = {
     customer: ", status = 'active'",
     quotation: ", status = 'PENDING'",
-    cheque: ", status = 'CLEARED'",
-    compliance_meeting: ", status = 'SCHEDULED'",
   }[entityType] || "";
 
   return withTransaction(pool, async (client) => {
@@ -6366,14 +5906,15 @@ async function ensureAccessibleShipmentThreadMembershipsForUser(userId, { organi
 }
 
 function toUiChatMember(row) {
+  const role = normalizeRetiredRole(row.role) || "";
   return {
     id: row.id,
     userId: row.id,
     name: row.name || row.email || "User",
     displayName: row.name || row.email || "User",
     email: row.email || "",
-    role: row.role || "",
-    roleName: row.role || "",
+    role,
+    roleName: role,
     avatar: row.avatar || "",
     isOnline: Boolean(row.is_online),
     active: (row.status || "active") === "active",
@@ -8441,7 +7982,8 @@ async function syncCanonicalCollection(client, ownerUserId, ownerOrganizationId,
     for (const task of records) {
       const existingTask = existingTasks.get(task.id) || {};
       const sourceType = task.sourceType || existingTask.source_type || "MANUAL";
-      const sourceId = task.sourceId || existingTask.source_id || null;
+      const isManualSource = String(sourceType).toUpperCase() === "MANUAL";
+      const sourceId = isManualSource ? null : task.sourceId || existingTask.source_id || null;
       const assignedToUserId =
         task.assignedToUserId && validTaskUserIds.has(task.assignedToUserId) ? task.assignedToUserId : null;
       const assignedByUserId =
@@ -8466,6 +8008,12 @@ async function syncCanonicalCollection(client, ownerUserId, ownerOrganizationId,
         sourceType,
         ...(sourceId ? { sourceId } : {}),
       };
+      if (isManualSource) {
+        legacy.sourceType = "MANUAL";
+        delete legacy.sourceId;
+        delete legacy.source_id;
+        delete legacy.source_type;
+      }
       await client.query(
         `INSERT INTO tasks (
            id, organization_id, owner_user_id, title, description, status, priority, assigned_to_id,
@@ -8630,122 +8178,6 @@ async function syncCanonicalCollection(client, ownerUserId, ownerOrganizationId,
           notification.isRead ? new Date() : null,
         ]
       );
-    }
-  }
-
-  if (collection === "cheques") {
-    for (const cheque of records) {
-      await client.query(
-        `INSERT INTO cheques (
-           id, organization_id, owner_user_id, bank_name, cheque_number, amount, due_date,
-           location, receiver, status, description, legacy_data, archived_at, updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           organization_id = EXCLUDED.organization_id,
-           bank_name = EXCLUDED.bank_name,
-           cheque_number = EXCLUDED.cheque_number,
-           amount = EXCLUDED.amount,
-           due_date = EXCLUDED.due_date,
-           location = EXCLUDED.location,
-           receiver = EXCLUDED.receiver,
-           status = EXCLUDED.status,
-           description = EXCLUDED.description,
-           legacy_data = EXCLUDED.legacy_data,
-           archived_at = EXCLUDED.archived_at,
-           updated_at = NOW()`,
-        [
-          cheque.id,
-          ownerOrganizationId,
-          ownerUserId,
-          cheque.bankName || "",
-          cheque.chequeNumber || cheque.id,
-          Number(cheque.amount || 0),
-          cheque.dueDate || null,
-          cheque.location || null,
-          cheque.receiver || null,
-          cheque.status || "ACTIVE",
-          cheque.description || null,
-          JSON.stringify(cheque),
-          cheque.status === "ARCHIVED" ? new Date() : null,
-        ]
-      );
-    }
-  }
-
-  if (collection === "appointments") {
-    for (const appointment of records) {
-      await client.query(
-        `INSERT INTO compliance_meetings (
-           id, organization_id, owner_user_id, title, organization_name, meeting_at, status,
-           assigned_to_id, assigned_to_name, outcome, next_action_items,
-           reminder_sent, legacy_data, archived_at, updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           organization_id = EXCLUDED.organization_id,
-           title = EXCLUDED.title,
-           organization_name = EXCLUDED.organization_name,
-           meeting_at = EXCLUDED.meeting_at,
-           status = EXCLUDED.status,
-           assigned_to_id = EXCLUDED.assigned_to_id,
-           assigned_to_name = EXCLUDED.assigned_to_name,
-           outcome = EXCLUDED.outcome,
-           next_action_items = EXCLUDED.next_action_items,
-           reminder_sent = EXCLUDED.reminder_sent,
-           legacy_data = EXCLUDED.legacy_data,
-           archived_at = EXCLUDED.archived_at,
-           updated_at = NOW()`,
-        [
-          appointment.id,
-          ownerOrganizationId,
-          ownerUserId,
-          appointment.purpose || appointment.id,
-          appointment.departmentName || null,
-          appointment.dateTime || null,
-          appointment.status || "SCHEDULED",
-          appointment.assignedPersonId || null,
-          appointment.assignedPersonName || null,
-          appointment.outcome || null,
-          appointment.nextActionItems || null,
-          Boolean(appointment.reminderSent),
-          JSON.stringify(appointment),
-          appointment.status === "ARCHIVED" ? new Date() : null,
-        ]
-      );
-
-      await client.query("DELETE FROM meeting_required_documents WHERE meeting_id = $1", [
-        appointment.id,
-      ]);
-      const requiredDocuments = Array.isArray(appointment.requiredDocuments)
-        ? appointment.requiredDocuments
-        : [];
-      for (const document of requiredDocuments) {
-        await client.query(
-          `INSERT INTO meeting_required_documents (
-             id, organization_id, meeting_id, name, required, completed, file_name, legacy_data, updated_at
-           )
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
-           ON CONFLICT (id) DO UPDATE SET
-             organization_id = EXCLUDED.organization_id,
-             name = EXCLUDED.name,
-             required = EXCLUDED.required,
-             completed = EXCLUDED.completed,
-             file_name = EXCLUDED.file_name,
-             legacy_data = EXCLUDED.legacy_data,
-             updated_at = NOW()`,
-          [
-            document.id || crypto.randomUUID(),
-            ownerOrganizationId,
-            appointment.id,
-            document.name || "Document",
-            document.required !== false,
-            Boolean(document.completed),
-            document.fileName || null,
-            JSON.stringify(document),
-          ]
-        );
-      }
     }
   }
 

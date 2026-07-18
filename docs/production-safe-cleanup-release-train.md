@@ -1,10 +1,21 @@
 # Production-Safe Cleanup Release Train
 
-Production remains at Liara release `v120` and Git SHA `f57ad269fc0f7ab0c3b686a02acf72b61628c357` until PRs 00-02 are integrated sequentially, the final exact SHA passes staging validation, and production deployment receives explicit approval.
+The exact production Liara release and Git SHA must be reverified immediately before stage 1. The previously recorded `v120` / `f57ad269fc0f7ab0c3b686a02acf72b61628c357` baseline is historical and must not be assumed current. Production deployment still requires explicit approval.
 
 ## Recovery Baseline Status
 
-The 2026-07-16 recovery gate is green: the dependency lock is installable under Node 22, source contains all 36 checksum-verified production migrations, the encrypted database dump restores cleanly on PostgreSQL 16, all 155 copied objects passed size and checksum verification, and the disposable restore was destroyed. Object-mode staging initialization, synthetic smoke testing, and rollback/roll-forward rehearsal also passed with zero-downtime enabled. Staging release `v5` is READY at PR 02 SHA `f87ef4227f941095e4bc135afb9e9ec567235912`; production was not deployed or migrated.
+The 2026-07-16 recovery rehearsal was green for its then-current 36-migration baseline: the dependency lock installed under Node 22, the encrypted database dump restored on PostgreSQL 16, all 155 copied objects passed size/checksum verification, and the disposable restore was destroyed. Object-mode staging and rollback/roll-forward rehearsal also passed. Because this retirement adds a 37th migration and later application releases exist, repeat the backup/restore and staging gates against the newly verified production baseline before either retirement stage.
+
+## Permanent Feature Retirement: Cheques And Compliance Meetings
+
+This retirement is a destructive product change and runs as its own two-stage release before the remaining cleanup units:
+
+1. Deploy the code-only retirement release first. It removes the UI, routes, APIs, permissions, dashboard/archive integration, and feature writes while leaving the existing feature tables and rows untouched. Old-client `cheques` and `appointments` compatibility payloads must be ignored. Observe a complete 24-hour business cycle and confirm zero feature-table writes or retired-route traffic before proceeding.
+2. After a fresh verified backup and successful disposable restore/staging rehearsal, apply the separately reviewed forward migration. It removes only feature-owned rows, permissions, subscription flags, associations, and the dedicated cheque/compliance tables. Shared documents and object files, generic tasks, audit logs, change logs, and migration history remain preserved. Table drops must be explicit and must not use `CASCADE`.
+
+Stage 2 must first pass the dedicated retirement verifier against the restored production-sized copy. The migration intentionally aborts if the legacy and replacement role grants are not equivalent, subscription JSON is malformed, or required table locks cannot be acquired within five seconds. Do not weaken or bypass those guards; investigate drift or traffic and rehearse again.
+
+Before stage 2, rollback may redeploy the previous feature-aware application release because the database is unchanged. After stage 2, the rollback boundary moves permanently: feature-aware releases are schema-incompatible and must never be redeployed. Application rollback is limited to the code-only retirement release or a newer forward fix. Do not restore the production database or object bucket for an application rollback; if retired data must be recovered, restore the backup into an isolated database and perform a separately reviewed targeted recovery.
 
 ## Release Units
 

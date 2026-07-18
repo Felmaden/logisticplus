@@ -135,9 +135,9 @@ npm run documents:storage:backfill
 `seed:production-core` creates or ensures only shared production catalog data:
 
 - Public subscription plans from [src/lib/subscriptionPlans.ts](/C:/Users/Ahmadreza/Documents/logisticplus/src/lib/subscriptionPlans.ts): `starter`, `business`, `enterprise`.
-- Tenant permissions used by dashboards, customers, shipments, documents, tasks, chat, archive, compliance, quotations, cheques, and user management.
+- Tenant permissions used by dashboards, customers, shipments, documents, tasks, chat, archive, quotations, and user management.
 - Direct-only platform permission `platform.admin`.
-- Tenant roles: `CEO`, `MANAGER`, `OPERATIONS`, `CUSTOMER_SERVICE`, `FINANCE`, `QUOTATION_MANAGER`, `COMPLIANCE_STAFF`, `EMPLOYEE`, `CUSTOMER_VIEWER`.
+- Tenant roles: `CEO`, `MANAGER`, `OPERATIONS`, `CUSTOMER_SERVICE`, `FINANCE`, `QUOTATION_MANAGER`, `EMPLOYEE`, `CUSTOMER_VIEWER`.
 - Role-permission rows for tenant access. No role receives `platform.admin`.
 - First organization subscription when the initial organization already exists.
 

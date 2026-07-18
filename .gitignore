@@ -13,6 +13,7 @@ graphify-out/
 skills-lock.json
 storage/test-documents/
 storage/test-object-documents/
+storage/test-retired-features-documents/
 storage/documents/
 backups/
 .DS_Store

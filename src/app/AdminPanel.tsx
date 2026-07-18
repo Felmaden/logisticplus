@@ -42,8 +42,6 @@ const adminRoleOptions: AdminOrgUser["role"][] = ["CEO", "MANAGER", "OPERATIONS"
 
 const moduleLabels: Record<string, string> = {
   chat: "چت",
-  cheques: "چک‌ها",
-  compliance: "جلسات اداری",
   quotations: "استعلام قیمت",
   archive: "آرشیو",
 };

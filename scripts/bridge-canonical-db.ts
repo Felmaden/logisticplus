@@ -54,8 +54,6 @@ const permissionKeys = [
   "chat.media.delete",
   "users.manage",
   "users.promote",
-  "cheques.manage",
-  "compliance.manage",
   "quotations.manage",
   "archive.view",
   "customer_access.manage",
@@ -66,7 +64,6 @@ const companyOperationalPermissions = [
   "archive.view",
   "changes.view",
   "chat.use",
-  "compliance.manage",
   "customer_access.manage",
   "customers.create",
   "customers.update",
@@ -93,9 +90,8 @@ const rolePermissions = {
   MANAGER: permissionKeys.filter((key) => !["users.promote", "chat.media.view", "chat.media.delete", "shipment_workflows.manage"].includes(key)),
   OPERATIONS: ["dashboard.view", ...companyOperationalPermissions],
   CUSTOMER_SERVICE: ["dashboard.view", ...companyOperationalPermissions],
-  FINANCE: ["dashboard.view", "cheques.manage", ...companyOperationalPermissions],
+  FINANCE: ["dashboard.view", ...companyOperationalPermissions],
   QUOTATION_MANAGER: ["dashboard.view", ...companyOperationalPermissions],
-  COMPLIANCE_STAFF: ["dashboard.view", ...companyOperationalPermissions],
   EMPLOYEE: ["dashboard.view", ...companyOperationalPermissions],
   CUSTOMER_VIEWER: [],
 };
@@ -105,9 +101,8 @@ const roleDescriptions = {
   MANAGER: "Operational management access",
   OPERATIONS: "Shipment operations access",
   CUSTOMER_SERVICE: "Customer service access",
-  FINANCE: "Finance and cheque access",
+  FINANCE: "Finance access",
   QUOTATION_MANAGER: "Quotation management access",
-  COMPLIANCE_STAFF: "Compliance meeting access",
   EMPLOYEE: "Assigned work access",
   CUSTOMER_VIEWER: "External customer-safe access",
 };
@@ -122,6 +117,21 @@ function permissionId(permission: string) {
 
 function asJson(value: unknown) {
   return JSON.stringify(value ?? {});
+}
+
+function normalizeRetiredRole(role: unknown) {
+  return String(role || "").toUpperCase() === "COMPLIANCE_STAFF" ? "OPERATIONS" : role;
+}
+
+function sanitizeBridgedTask(task: any) {
+  if (String(task?.sourceType ?? task?.source_type ?? "").toUpperCase() !== "COMPLIANCE_MEETING") {
+    return task;
+  }
+  const sanitized = { ...task, sourceType: "MANUAL" };
+  delete sanitized.sourceId;
+  delete sanitized.source_id;
+  delete sanitized.source_type;
+  return sanitized;
 }
 
 function isLegacyDemoNotification(notification: any) {
@@ -208,9 +218,6 @@ async function attachExistingDataToDefaultOrganization(client: Client) {
     "shipments",
     "shipment_status_events",
     "tasks",
-    "cheques",
-    "compliance_meetings",
-    "meeting_required_documents",
     "quotations",
     "archive_records",
     "chat_threads",
@@ -665,7 +672,7 @@ async function bridgeUsers(client: Client, users: any[]) {
         user.name,
         user.email,
         tempPasswordHash,
-        user.role || "EMPLOYEE",
+        normalizeRetiredRole(user.role || "EMPLOYEE"),
         user.avatar || null,
         Boolean(user.isOnline),
         user.department || null,
@@ -745,6 +752,7 @@ async function bridgeShipments(client: Client, shipments: any[]) {
 
 async function bridgeTasks(client: Client, tasks: any[]) {
   for (const task of tasks) {
+    const bridgedTask = sanitizeBridgedTask(task);
     await client.query(
       `INSERT INTO tasks (
          id, owner_user_id, title, description, status, priority, assigned_to_id,
@@ -775,7 +783,7 @@ async function bridgeTasks(client: Client, tasks: any[]) {
         task.assignedByName || null,
         task.dueDate || null,
         task.shipmentId || null,
-        asJson(task),
+        asJson(bridgedTask),
       ]
     );
   }
@@ -843,116 +851,6 @@ async function bridgeNotifications(client: Client, notifications: any[]) {
         notification.isRead ? new Date() : null,
       ]
     );
-  }
-}
-
-async function bridgeCheques(client: Client, cheques: any[]) {
-  for (const cheque of cheques) {
-    await client.query(
-      `INSERT INTO cheques (
-         id, owner_user_id, bank_name, cheque_number, amount, due_date,
-         location, receiver, status, description, legacy_data, archived_at, updated_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         bank_name = EXCLUDED.bank_name,
-         cheque_number = EXCLUDED.cheque_number,
-         amount = EXCLUDED.amount,
-         due_date = EXCLUDED.due_date,
-         location = EXCLUDED.location,
-         receiver = EXCLUDED.receiver,
-         status = EXCLUDED.status,
-         description = EXCLUDED.description,
-         legacy_data = EXCLUDED.legacy_data,
-         archived_at = EXCLUDED.archived_at,
-         updated_at = NOW()`,
-      [
-        cheque.id,
-        ownerUserId,
-        cheque.bankName || "",
-        cheque.chequeNumber || cheque.id,
-        Number(cheque.amount || 0),
-        cheque.dueDate || null,
-        cheque.location || null,
-        cheque.receiver || null,
-        cheque.status || "ACTIVE",
-        cheque.description || null,
-        asJson(cheque),
-        cheque.status === "ARCHIVED" ? new Date() : null,
-      ]
-    );
-  }
-}
-
-async function bridgeComplianceMeetings(client: Client, appointments: any[]) {
-  for (const appointment of appointments) {
-    await client.query(
-      `INSERT INTO compliance_meetings (
-         id, owner_user_id, title, organization_name, meeting_at, status,
-         assigned_to_id, assigned_to_name, outcome, next_action_items,
-         reminder_sent, legacy_data, archived_at, updated_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         title = EXCLUDED.title,
-         organization_name = EXCLUDED.organization_name,
-         meeting_at = EXCLUDED.meeting_at,
-         status = EXCLUDED.status,
-         assigned_to_id = EXCLUDED.assigned_to_id,
-         assigned_to_name = EXCLUDED.assigned_to_name,
-         outcome = EXCLUDED.outcome,
-         next_action_items = EXCLUDED.next_action_items,
-         reminder_sent = EXCLUDED.reminder_sent,
-         legacy_data = EXCLUDED.legacy_data,
-         archived_at = EXCLUDED.archived_at,
-         updated_at = NOW()`,
-      [
-        appointment.id,
-        ownerUserId,
-        appointment.purpose || appointment.id,
-        appointment.departmentName || null,
-        appointment.dateTime || null,
-        appointment.status || "SCHEDULED",
-        appointment.assignedPersonId || null,
-        appointment.assignedPersonName || null,
-        appointment.outcome || null,
-        appointment.nextActionItems || null,
-        Boolean(appointment.reminderSent),
-        asJson(appointment),
-        appointment.status === "ARCHIVED" ? new Date() : null,
-      ]
-    );
-
-    await client.query("DELETE FROM meeting_required_documents WHERE meeting_id = $1", [
-      appointment.id,
-    ]);
-    const requiredDocuments = Array.isArray(appointment.requiredDocuments)
-      ? appointment.requiredDocuments
-      : [];
-    for (const document of requiredDocuments) {
-      await client.query(
-        `INSERT INTO meeting_required_documents (
-           id, meeting_id, name, required, completed, file_name, legacy_data, updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           name = EXCLUDED.name,
-           required = EXCLUDED.required,
-           completed = EXCLUDED.completed,
-           file_name = EXCLUDED.file_name,
-           legacy_data = EXCLUDED.legacy_data,
-           updated_at = NOW()`,
-        [
-          document.id || crypto.randomUUID(),
-          appointment.id,
-          document.name || "Document",
-          document.required !== false,
-          Boolean(document.completed),
-          document.fileName || null,
-          asJson(document),
-        ]
-      );
-    }
   }
 }
 
@@ -1085,8 +983,6 @@ async function bridge() {
     const tasks = await getCollection(client, "tasks");
     const documents = await getCollection(client, "documents");
     const notifications = await getCollection(client, "notifications");
-    const cheques = await getCollection(client, "cheques");
-    const appointments = await getCollection(client, "appointments");
     const quotes = await getCollection(client, "quotes");
     const channels = await getCollection(client, "channels");
     const messages = await getCollection(client, "messages");
@@ -1098,8 +994,6 @@ async function bridge() {
     await bridgeTasks(client, tasks);
     await bridgeDocuments(client, documents);
     await bridgeNotifications(client, notifications);
-    await bridgeCheques(client, cheques);
-    await bridgeComplianceMeetings(client, appointments);
     await bridgeQuotations(client, quotes);
     await bridgeChat(client, channels, messages);
     await bridgeActivityLogs(client, activityLogs);
@@ -1117,8 +1011,6 @@ async function bridge() {
             tasks: tasks.length,
         documents: documents.length,
         notifications: notifications.length,
-        cheques: cheques.length,
-        appointments: appointments.length,
         quotes: quotes.length,
         channels: channels.length,
         messages: messages.length,

@@ -67,7 +67,7 @@ const demoUsers = [
     phone: "09123864075",
     department: "مالی و وصول مطالبات",
     location: "تهران",
-    bio: "مسئول کنترل چک‌ها، پیش‌فاکتورها و تسویه‌های مشتریان.",
+    bio: "مسئول کنترل پیش‌فاکتورها و تسویه‌های مشتریان.",
     memberRole: "member",
   },
 ];
@@ -101,8 +101,6 @@ const permissionKeys = [
   "chat.manage_groups",
   "users.manage",
   "users.promote",
-  "cheques.manage",
-  "compliance.manage",
   "quotations.manage",
   "archive.view",
   "customer_access.manage",
@@ -112,7 +110,6 @@ const companyOperationalPermissions = [
   "archive.view",
   "changes.view",
   "chat.use",
-  "compliance.manage",
   "customer_access.manage",
   "customers.create",
   "customers.update",
@@ -137,13 +134,13 @@ const companyOperationalPermissions = [
 const rolePermissions = {
   MANAGER: permissionKeys.filter((key) => key !== "users.promote"),
   OPERATIONS: ["dashboard.view", ...companyOperationalPermissions],
-  FINANCE: ["dashboard.view", "cheques.manage", ...companyOperationalPermissions],
+  FINANCE: ["dashboard.view", ...companyOperationalPermissions],
 };
 
 const roleDescriptions = {
   MANAGER: "Operational management access",
   OPERATIONS: "Shipment operations access",
-  FINANCE: "Finance and cheque access",
+  FINANCE: "Finance access",
 };
 
 const defaultSteps = [
@@ -729,111 +726,6 @@ const quotations = [
   },
 ];
 
-const cheques = [
-  {
-    id: "prs-cheque-001",
-    bankName: "بانک ملت",
-    chequeNumber: "۷۳۲۸۴۱/۴۵",
-    amount: 1850000000,
-    dueDate: "۱۴۰۵/۰۳/۱۲",
-    location: "تهران",
-    receiver: "حمل‌ونقل بین‌المللی پارس‌راه",
-    status: "ACTIVE",
-    customerId: "prs-customer-aria",
-    description: "بابت بخشی از هزینه حمل زمینی و بیمه محموله PRR-1405-001.",
-  },
-  {
-    id: "prs-cheque-002",
-    bankName: "بانک سامان",
-    chequeNumber: "۵۸۹۲۱۰/۱۹",
-    amount: 2760000000,
-    dueDate: "۱۴۰۵/۰۳/۲۰",
-    location: "کرج",
-    receiver: "حمل‌ونقل بین‌المللی پارس‌راه",
-    status: "ACTIVE",
-    customerId: "prs-customer-sepiddaneh",
-    description: "در انتظار وصول برای حمل دریایی دو کانتینر مواد اولیه.",
-  },
-  {
-    id: "prs-cheque-003",
-    bankName: "بانک تجارت",
-    chequeNumber: "۹۲۱۷۵۴/۰۳",
-    amount: 940000000,
-    dueDate: "۱۴۰۵/۰۲/۲۶",
-    location: "اصفهان",
-    receiver: "حمل‌ونقل بین‌المللی پارس‌راه",
-    status: "CLEARED",
-    customerId: "prs-customer-kaveh",
-    description: "وصول‌شده بابت حمل داخلی و تحویل نهایی کاوه فولاد.",
-  },
-  {
-    id: "prs-cheque-004",
-    bankName: "بانک پاسارگاد",
-    chequeNumber: "۶۴۰۲۸۳/۸۸",
-    amount: 1280000000,
-    dueDate: "۱۴۰۵/۰۳/۰۳",
-    location: "مشهد",
-    receiver: "حمل‌ونقل بین‌المللی پارس‌راه",
-    status: "ACTIVE",
-    customerId: "prs-customer-aftab",
-    description: "نزدیک سررسید؛ تماس یادآوری با واحد مالی آفتاب شرق انجام شود.",
-  },
-];
-
-const meetings = [
-  {
-    id: "prs-meeting-001",
-    title: "جلسه بررسی مدارک واردات",
-    dateTime: "۱۴۰۵/۰۳/۰۴ ۱۰:۰۰",
-    customerId: "prs-customer-nikan",
-    shipmentId: "prs-shipment-006",
-    status: "SCHEDULED",
-    assignedTo: operationsUser,
-    location: "اتاق جلسات تهران",
-    description: "بررسی اصلاحیه فاکتور، پکینگ لیست و مدارک وزارت بهداشت قبل از ادامه ترخیص.",
-    outcome: "",
-    nextActionItems: "ارسال نسخه اصلاح‌شده فاکتور تا پیش از جلسه.",
-    requiredDocuments: [
-      { id: "prs-meeting-doc-001", name: "فاکتور تجاری اصلاح‌شده", required: true, completed: false },
-      { id: "prs-meeting-doc-002", name: "تاییدیه اداره تجهیزات پزشکی", required: true, completed: false },
-    ],
-  },
-  {
-    id: "prs-meeting-002",
-    title: "جلسه پیگیری مجوز گمرکی",
-    dateTime: "۱۴۰۵/۰۳/۰۵ ۱۴:۳۰",
-    customerId: "prs-customer-sepiddaneh",
-    shipmentId: "prs-shipment-009",
-    status: "IN_PROGRESS",
-    assignedTo: operationsUser,
-    location: "تماس آنلاین با کارگزار بندرعباس",
-    description: "هماهنگی خروج بار از گمرک و کنترل هزینه‌های بندری قبل از حمل داخلی.",
-    outcome: "پروانه صادر شده و در انتظار تخصیص کامیون است.",
-    nextActionItems: "ارسال تصویر پروانه و برنامه خروج برای مشتری.",
-    requiredDocuments: [
-      { id: "prs-meeting-doc-003", name: "پروانه سبز گمرکی", required: true, completed: true, fileName: "مجوز-گمرکی-سپیددانه.txt" },
-      { id: "prs-meeting-doc-004", name: "قبض انبار بندری", required: true, completed: true },
-    ],
-  },
-  {
-    id: "prs-meeting-003",
-    title: "جلسه بررسی ریسک تأخیر محموله",
-    dateTime: "۱۴۰۵/۰۳/۰۲ ۱۱:۳۰",
-    customerId: "prs-customer-kaveh",
-    shipmentId: "prs-shipment-007",
-    status: "SCHEDULED",
-    assignedTo: manager,
-    location: "دفتر مرکزی پارس‌راه",
-    description: "تحلیل ریسک تاخیر ناوگان، برنامه جایگزین و نحوه اطلاع‌رسانی به مشتری.",
-    outcome: "",
-    nextActionItems: "گزارش وضعیت حمل‌کننده و گزینه‌های ناوگان جایگزین آماده شود.",
-    requiredDocuments: [
-      { id: "prs-meeting-doc-005", name: "گزارش حمل‌کننده", required: true, completed: false },
-      { id: "prs-meeting-doc-006", name: "برنامه جایگزین حمل داخلی", required: true, completed: false },
-    ],
-  },
-];
-
 function roleId(role: string) {
   return `role-${role.toLowerCase().replace(/_/g, "-")}`;
 }
@@ -991,14 +883,6 @@ const notifications = [
     type: "WARNING",
     link: "/tasks",
   },
-  {
-    id: "prs-notification-003",
-    userId: financeUser.id,
-    title: "چک نزدیک سررسید",
-    body: "چک آفتاب شرق در تاریخ ۱۴۰۵/۰۳/۰۳ نیازمند پیگیری وصول است.",
-    type: "INFO",
-    link: "/cheques",
-  },
 ];
 
 function toUiUser(user: any) {
@@ -1090,39 +974,6 @@ function toUiDocument(document: any) {
   };
 }
 
-function toUiCheque(cheque: any) {
-  return {
-    id: cheque.id,
-    bankName: cheque.bankName,
-    chequeNumber: cheque.chequeNumber,
-    amount: cheque.amount,
-    dueDate: cheque.dueDate,
-    location: cheque.location,
-    receiver: cheque.receiver,
-    status: cheque.status,
-    description: cheque.description,
-    createdAt: "۱۴۰۵/۰۲/۲۲",
-  };
-}
-
-function toUiMeeting(meeting: any) {
-  return {
-    id: meeting.id,
-    dateTime: meeting.dateTime,
-    departmentName: getCustomer(meeting.customerId).companyName,
-    purpose: meeting.title,
-    requiredDocuments: meeting.requiredDocuments,
-    assignedPersonId: meeting.assignedTo.id,
-    assignedPersonName: meeting.assignedTo.name,
-    status: meeting.status,
-    outcome: meeting.outcome,
-    nextActionItems: meeting.nextActionItems,
-    reminderSent: false,
-    createdAt: "۱۴۰۵/۰۲/۳۰",
-    isArchived: false,
-  };
-}
-
 function toUiQuote(quote: any) {
   return {
     id: quote.id,
@@ -1190,8 +1041,6 @@ function buildRecordsForUser(user: any) {
     documents: documents.map(toUiDocument),
     commercialCards: [],
     channels: [],
-    appointments: meetings.map(toUiMeeting),
-    cheques: cheques.map(toUiCheque),
     quotes: quotations.map(toUiQuote),
     deletedItems: [],
     defaultSteps,
@@ -1317,15 +1166,7 @@ async function cleanupDemoTenant(client: any) {
     [DEMO_ORGANIZATION.id]
   );
   await client.query("DELETE FROM documents WHERE organization_id = $1", [DEMO_ORGANIZATION.id]);
-  await client.query(
-    `DELETE FROM meeting_required_documents
-     WHERE organization_id = $1
-        OR meeting_id IN (SELECT id FROM compliance_meetings WHERE organization_id = $1)`,
-    [DEMO_ORGANIZATION.id]
-  );
   await client.query("DELETE FROM archive_records WHERE organization_id = $1", [DEMO_ORGANIZATION.id]);
-  await client.query("DELETE FROM compliance_meetings WHERE organization_id = $1", [DEMO_ORGANIZATION.id]);
-  await client.query("DELETE FROM cheques WHERE organization_id = $1", [DEMO_ORGANIZATION.id]);
   await client.query("DELETE FROM tasks WHERE organization_id = $1", [DEMO_ORGANIZATION.id]);
   await client.query(
     `DELETE FROM shipment_status_events
@@ -1387,7 +1228,7 @@ async function ensureRolesAndPlans(client: any) {
        99000000,
        990000000,
        '{"users":30,"monthlyShipments":0,"storageMb":51200}'::jsonb,
-       '{"chat":true,"cheques":true,"compliance":true,"quotations":true,"archive":true}'::jsonb,
+       '{"chat":true,"quotations":true,"archive":true}'::jsonb,
        3,
        NOW()
      )
@@ -1712,89 +1553,6 @@ async function seedQuotations(client: any) {
   }
 }
 
-async function seedCheques(client: any) {
-  for (const cheque of cheques) {
-    await client.query(
-      `INSERT INTO cheques (
-         id, organization_id, owner_user_id, bank_name, cheque_number, amount, currency,
-         due_date, location, receiver, status, description, assigned_to_id, customer_id,
-         legacy_data, created_by_id, created_at, updated_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, 'IRR', $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15, NOW(), NOW())`,
-      [
-        cheque.id,
-        DEMO_ORGANIZATION.id,
-        manager.id,
-        cheque.bankName,
-        cheque.chequeNumber,
-        cheque.amount,
-        cheque.dueDate,
-        cheque.location,
-        cheque.receiver,
-        cheque.status,
-        cheque.description,
-        financeUser.id,
-        cheque.customerId,
-        asJson({ seedKey: SEED_KEY, ...toUiCheque(cheque) }),
-        financeUser.id,
-      ]
-    );
-  }
-}
-
-async function seedMeetings(client: any) {
-  for (const meeting of meetings) {
-    await client.query(
-      `INSERT INTO compliance_meetings (
-         id, organization_id, owner_user_id, title, organization_name, meeting_at,
-         location, status, assigned_to_id, assigned_to_name, description, outcome,
-         next_action_items, reminder_sent, related_customer_id, related_shipment_id,
-         legacy_data, created_by_id, created_at, updated_at
-       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, FALSE, $14, $15, $16::jsonb, $17, NOW(), NOW())`,
-      [
-        meeting.id,
-        DEMO_ORGANIZATION.id,
-        manager.id,
-        meeting.title,
-        getCustomer(meeting.customerId).companyName,
-        meeting.dateTime,
-        meeting.location,
-        meeting.status,
-        meeting.assignedTo.id,
-        meeting.assignedTo.name,
-        meeting.description,
-        meeting.outcome,
-        meeting.nextActionItems,
-        meeting.customerId,
-        meeting.shipmentId,
-        asJson({ seedKey: SEED_KEY, ...toUiMeeting(meeting) }),
-        manager.id,
-      ]
-    );
-
-    for (const document of meeting.requiredDocuments) {
-      await client.query(
-        `INSERT INTO meeting_required_documents (
-           id, organization_id, meeting_id, name, required, completed, file_name,
-           legacy_data, created_at, updated_at
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW(), NOW())`,
-        [
-          document.id,
-          DEMO_ORGANIZATION.id,
-          meeting.id,
-          document.name,
-          document.required !== false,
-          Boolean(document.completed),
-          document.fileName || null,
-          asJson({ seedKey: SEED_KEY, ...document }),
-        ]
-      );
-    }
-  }
-}
-
 async function seedArchiveRecords(client: any) {
   const archivedDocument = documents.find((document) => document.archivedAt);
   const archivedQuote = quotations.find((quote) => quote.archivedAt);
@@ -1934,8 +1692,6 @@ async function seed() {
     await writeDocumentFiles();
     await seedDocuments(client);
     await seedQuotations(client);
-    await seedCheques(client);
-    await seedMeetings(client);
     await seedArchiveRecords(client);
     await seedNotifications(client);
     await seedCompatibilityRecords(client);
@@ -1983,8 +1739,6 @@ async function seed() {
   console.log(`  Tasks: ${tasks.length}`);
   console.log(`  Documents: ${documents.length} (${documents.filter((document) => document.visibility === "customer_visible").length} customer-visible)`);
   console.log(`  Quotations: ${quotations.filter((quote) => !quote.archivedAt).length} active + ${quotations.filter((quote) => quote.archivedAt).length} archived`);
-  console.log(`  Cheques: ${cheques.length}`);
-  console.log(`  Compliance meetings: ${meetings.length}`);
   console.log(`  Public tracking links: ${trackingLinks.length}`);
   console.log("");
   console.log("Sample public tracking links:");

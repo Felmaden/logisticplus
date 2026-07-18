@@ -66,15 +66,6 @@ test.describe.serial("Parsrah showcase company", () => {
     expect(quotations).toHaveLength(3);
     expect(quotations.map((quote) => quote.status).sort()).toEqual(["ACCEPTED", "PENDING", "PENDING"]);
 
-    const cheques = await readOk<any[]>(await manager.get("/api/cheques"));
-    expect(cheques).toHaveLength(4);
-    expect(cheques.filter((cheque) => cheque.status === "ACTIVE")).toHaveLength(3);
-    expect(cheques.filter((cheque) => cheque.status === "CLEARED")).toHaveLength(1);
-
-    const meetings = await readOk<any[]>(await manager.get("/api/compliance-meetings"));
-    expect(meetings).toHaveLength(3);
-    expect(meetings.map((meeting) => meeting.purpose)).toContain("جلسه بررسی ریسک تأخیر محموله");
-
     const tasks = await readOk<any[]>(await manager.get("/api/tasks"));
     expect(tasks.length).toBeGreaterThanOrEqual(7);
     expect(tasks.some((task) => task.priority === "URGENT")).toBe(true);

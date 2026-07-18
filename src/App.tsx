@@ -39,8 +39,6 @@ const Documents = lazy(() => import("./app/Documents"));
 const DocumentManagementCenter = lazy(() => import("./app/DocumentManagementCenter"));
 const ShipmentEdit = lazy(() => import("./app/ShipmentEdit").then((module) => ({ default: module.ShipmentEdit })));
 const ChangeLog = lazy(() => import("./app/ChangeLog"));
-const Compliance = lazy(() => import("./app/Compliance"));
-const ChequeManagement = lazy(() => import("./app/ChequeManagement"));
 const CommercialCards = lazy(() => import("./app/CommercialCards"));
 const ArchivePage = lazy(() => import("./app/Archive"));
 const QuotageManagement = QUOTATIONS_UI_ENABLED ? lazy(() => import("./app/QuotageManagement")) : null;
@@ -56,9 +54,6 @@ const protectedRoutePrefixes = [
   "/customers",
   "/tasks",
   "/documents",
-  "/compliance",
-  "/compliance-meetings",
-  "/cheques",
   "/commercial-cards",
   "/rates",
   "/search",
@@ -116,9 +111,9 @@ function AppRoutes() {
         <Route path="/tasks" element={<ProtectedAppLayout anyOf={["tasks.view_own", "tasks.view_all"]}><Tasks /></ProtectedAppLayout>} />
         <Route path="/documents" element={<ProtectedAppLayout anyOf={["documents.view_all"]}><Documents /></ProtectedAppLayout>} />
         <Route path="/documents/management-center" element={<ProtectedAppLayout allOf={["documents.view_all", "shipments.view_all"]}><DocumentManagementCenter /></ProtectedAppLayout>} />
-        <Route path="/compliance" element={<Navigate to="/compliance-meetings" replace />} />
-        <Route path="/compliance-meetings" element={<ProtectedAppLayout anyOf={["compliance.manage"]}><Compliance /></ProtectedAppLayout>} />
-        <Route path="/cheques" element={<ProtectedAppLayout anyOf={["cheques.manage"]}><ChequeManagement /></ProtectedAppLayout>} />
+        <Route path="/compliance/*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/compliance-meetings/*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/cheques/*" element={<Navigate to="/dashboard" replace />} />
         <Route path="/commercial-cards" element={<ProtectedAppLayout><CommercialCards /></ProtectedAppLayout>} />
         <Route path="/rates" element={<ProtectedAppLayout><RatesAndTariffs /></ProtectedAppLayout>} />
         <Route path="/search" element={<ProtectedAppLayout><SearchPage /></ProtectedAppLayout>} />

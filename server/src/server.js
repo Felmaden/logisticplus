@@ -34,8 +34,6 @@ import {
   assignTaskRecord,
   archiveChatThread,
   archiveDocumentRecord,
-  archiveChequeRecord,
-  archiveComplianceMeetingRecord,
   archiveCustomerRecord,
   archiveEntityRecord,
   auditLog,
@@ -50,8 +48,6 @@ import {
   createSession,
   createManualCompanySignup,
   createDocumentRecord,
-  createChequeRecord,
-  createComplianceMeetingRecord,
   createShipmentRecord,
   createAppErrorLog,
   createQuotationRecord,
@@ -105,7 +101,6 @@ import {
   listChatThreads,
   listCustomersDetailed,
   listDocuments,
-  listDueSoonCheques,
   listAppErrorLogs,
   listBillingInvoices,
   listBillingPayments,
@@ -133,15 +128,12 @@ import {
   setTaskStatus,
   updateDocumentMetadata,
   updateDocumentVisibility,
-  updateChequeRecord,
-  updateComplianceMeetingRecord,
   updateAppUserRecord,
   updateOrganizationRecord,
   updateOrganizationStatus,
   updateOrganizationSubscription,
   updateCustomerRecord,
   moveShipmentToExitedArchive,
-  updateMeetingRequiredDocument,
   updateQuotationRecord,
   restoreShipmentFromExitedArchive,
   updateShipmentOperationalFields,
@@ -150,7 +142,6 @@ import {
   updateShipmentStepRecord,
   updateTaskRecord,
   updateTaskStatusRecord,
-  upsertMeetingRequiredDocument,
   updateUserNotificationPreferences,
   updateUserPassword,
   updateUserProfile,
@@ -199,15 +190,6 @@ import { registerPublicTrackingRoutes } from "../../src/server/routes/public-tra
 import { registerShipmentProgressRoutes } from "../../src/server/routes/shipment-progress-routes.js";
 import { registerShipmentFormTemplateRoutes } from "../../src/server/routes/shipment-form-template-routes.js";
 import { registerShipmentWorkflowTemplateRoutes } from "../../src/server/routes/shipment-workflow-template-routes.js";
-import { registerChequeReadRoutes } from "../../src/server/routes/cheque-read-routes.js";
-import {
-  getChequeRecord as getChequeRecordFromRepository,
-  listCheques as listChequesFromRepository,
-} from "../../src/server/repositories/cheques.js";
-import {
-  getComplianceMeetingRecord as getComplianceMeetingRecordFromRepository,
-  listComplianceMeetings as listComplianceMeetingsFromRepository,
-} from "../../src/server/repositories/compliance-meetings.js";
 import {
   getQuotationRecord as getQuotationRecordFromRepository,
   listQuotations as listQuotationsFromRepository,
@@ -246,13 +228,6 @@ const listQuotations = ({
   });
 const getQuotationRecord = (id, { organizationId, includeCustomerPrivateDetails = true } = {}) =>
   getQuotationRecordFromRepository(pool, id, { organizationId, includeCustomerPrivateDetails });
-const listCheques = ({ ownerUserId, organizationId, includeArchived = false } = {}) =>
-  listChequesFromRepository(pool, { ownerUserId, organizationId, includeArchived });
-const getChequeRecord = (id, { organizationId } = {}) => getChequeRecordFromRepository(pool, id, { organizationId });
-const listComplianceMeetings = ({ ownerUserId, assignedToId, organizationId, includeArchived = false } = {}) =>
-  listComplianceMeetingsFromRepository(pool, { ownerUserId, assignedToId, organizationId, includeArchived });
-const getComplianceMeetingRecord = (id, { organizationId } = {}) =>
-  getComplianceMeetingRecordFromRepository(pool, id, { organizationId });
 
 const SESSION_COOKIE = "logisticplus_session";
 const PASSWORD_LOGIN_LIMIT = { limit: 5, windowMs: 15 * 60 * 1000 };
@@ -2012,358 +1987,6 @@ async function startServer() {
     updateTaskRecord,
     updateTaskStatusRecord,
     userHasPermission,
-  });
-
-  registerChequeReadRoutes(app, {
-    createApiError,
-    getChequeRecord,
-    listCheques,
-    listDueSoonCheques,
-    requireAuthenticatedTenantUser,
-    requirePermission,
-  });
-
-  app.post("/api/cheques", async (req, res) => {
-    try {
-      const tenantRequest = await requireAuthenticatedTenantUser(req, res, "cheque create API");
-      if (!tenantRequest) return;
-      const { user, tenantContext } = tenantRequest;
-      await requirePermission(user, "cheques.manage");
-      if (!req.body?.bankName || !req.body?.chequeNumber || Number(req.body?.amount || 0) <= 0) {
-        return createApiError(res, 400, "VALIDATION_ERROR", "Bank, cheque number, and positive amount are required.");
-      }
-      const data = await createChequeRecord({ ownerUserId: user.id, actorUserId: user.id, tenantContext, cheque: req.body });
-      await auditLog({
-        actorUserId: user.id,
-        action: "cheque.create",
-        entityType: "CHEQUE",
-        entityId: data.id,
-        summary: "Cheque was created.",
-        after: data,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Create cheque failed:", error);
-      createApiError(res, 500, "CREATE_CHEQUE_FAILED", "Could not create cheque.");
-    }
-  });
-
-  app.patch("/api/cheques/:id", async (req, res) => {
-    try {
-      const tenantRequest = await requireAuthenticatedTenantUser(req, res, "cheque update API");
-      if (!tenantRequest) return;
-      const { user, organizationId } = tenantRequest;
-      await requirePermission(user, "cheques.manage");
-      const result = await updateChequeRecord(req.params.id, req.body || {}, { organizationId });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Cheque was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "cheque.update",
-        entityType: "CHEQUE",
-        entityId: req.params.id,
-        summary: "Cheque was updated.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Update cheque failed:", error);
-      createApiError(res, 500, "UPDATE_CHEQUE_FAILED", "Could not update cheque.");
-    }
-  });
-
-  app.post("/api/cheques/:id/status", async (req, res) => {
-    try {
-      const tenantRequest = await requireAuthenticatedTenantUser(req, res, "cheque status API");
-      if (!tenantRequest) return;
-      const { user, organizationId } = tenantRequest;
-      await requirePermission(user, "cheques.manage");
-      const result = await updateChequeRecord(req.params.id, { status: req.body?.status }, { organizationId });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Cheque was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "cheque.status_change",
-        entityType: "CHEQUE",
-        entityId: req.params.id,
-        summary: "Cheque status was changed.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Update cheque status failed:", error);
-      createApiError(res, 500, "UPDATE_CHEQUE_STATUS_FAILED", "Could not update cheque status.");
-    }
-  });
-
-  app.post("/api/cheques/:id/archive", async (req, res) => {
-    try {
-      const tenantRequest = await requireAuthenticatedTenantUser(req, res, "cheque archive API");
-      if (!tenantRequest) return;
-      const { user, organizationId } = tenantRequest;
-      await requirePermission(user, "cheques.manage");
-      const result = await archiveChequeRecord(req.params.id, { organizationId });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Cheque was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "cheque.archive",
-        entityType: "CHEQUE",
-        entityId: req.params.id,
-        summary: "Cheque was archived.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Archive cheque failed:", error);
-      createApiError(res, 500, "ARCHIVE_CHEQUE_FAILED", "Could not archive cheque.");
-    }
-  });
-
-  app.get("/api/compliance-meetings", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      const canManage = await userHasPermission(user, "compliance.manage");
-      const data = await listComplianceMeetings(
-        canManage ? { organizationId: user.organizationId } : { organizationId: user.organizationId, assignedToId: user.id }
-      );
-      res.json({ ok: true, data });
-    } catch (error) {
-      console.error("List compliance meetings failed:", error);
-      createApiError(res, 500, "LIST_COMPLIANCE_FAILED", "Could not load compliance meetings.");
-    }
-  });
-
-  app.post("/api/compliance-meetings", async (req, res) => {
-    try {
-      const tenantRequest = await requireAuthenticatedTenantUser(req, res, "compliance meeting create API");
-      if (!tenantRequest) return;
-      const { user, tenantContext } = tenantRequest;
-      await requirePermission(user, "compliance.manage");
-      if (!req.body?.dateTime || !req.body?.purpose) {
-        return createApiError(res, 400, "VALIDATION_ERROR", "Meeting date/time and purpose are required.");
-      }
-      const data = await createComplianceMeetingRecord({ ownerUserId: user.id, actorUser: user, tenantContext, meeting: req.body });
-      if (req.body?.assignedPersonId) {
-        await createTaskRecord({
-          ownerUserId: user.id,
-          tenantContext,
-          title: `Ø¬Ù„Ø³Ù‡: ${req.body.purpose}`,
-          description: `Ø¢Ù…Ø§Ø¯Ù‡â€ŒØ³Ø§Ø²ÛŒ Ø¬Ù„Ø³Ù‡ ${req.body.purpose}`,
-          status: "TODO",
-          priority: "HIGH",
-          assignedToUserId: req.body.assignedPersonId,
-          assignedToName: req.body.assignedPersonName,
-          assignedByUserId: user.id,
-          assignedByName: user.name,
-          dueDate: String(req.body.dateTime).split(" ")[0],
-          deadline: String(req.body.dateTime).split(" ")[1] || "",
-          sourceType: "COMPLIANCE_MEETING",
-          sourceId: data.id,
-        });
-      }
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.create",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: data.id,
-        summary: "Compliance meeting was created.",
-        after: data,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Create compliance meeting failed:", error);
-      createApiError(res, 500, "CREATE_COMPLIANCE_FAILED", "Could not create compliance meeting.");
-    }
-  });
-
-  app.get("/api/compliance-meetings/:id", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      const data = await getComplianceMeetingRecord(req.params.id, { organizationId: user.organizationId });
-      if (!data) return createApiError(res, 404, "NOT_FOUND", "Compliance meeting was not found.");
-      const canManage = await userHasPermission(user, "compliance.manage");
-      if (!canManage && data.assigned_to_id !== user.id) {
-        return createApiError(res, 403, "FORBIDDEN", "You cannot view this meeting.");
-      }
-      res.json({ ok: true, data });
-    } catch (error) {
-      console.error("Get compliance meeting failed:", error);
-      createApiError(res, 500, "GET_COMPLIANCE_FAILED", "Could not load compliance meeting.");
-    }
-  });
-
-  app.patch("/api/compliance-meetings/:id", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      await requirePermission(user, "compliance.manage");
-      const result = await updateComplianceMeetingRecord(req.params.id, req.body || {}, { organizationId: user.organizationId });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Compliance meeting was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.update",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: req.params.id,
-        summary: "Compliance meeting was updated.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Update compliance meeting failed:", error);
-      createApiError(res, 500, "UPDATE_COMPLIANCE_FAILED", "Could not update compliance meeting.");
-    }
-  });
-
-  app.post("/api/compliance-meetings/:id/required-documents", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      await requirePermission(user, "compliance.manage");
-      const data = await upsertMeetingRequiredDocument(req.params.id, req.body || {}, { organizationId: user.organizationId });
-      if (!data) return createApiError(res, 404, "NOT_FOUND", "Compliance meeting was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.required_document.upsert",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: req.params.id,
-        summary: "Meeting required document was saved.",
-        after: data,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Save meeting document failed:", error);
-      createApiError(res, 500, "SAVE_MEETING_DOCUMENT_FAILED", "Could not save meeting document.");
-    }
-  });
-
-  app.patch("/api/compliance-meetings/:id/required-documents/:documentRequirementId", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      await requirePermission(user, "compliance.manage");
-      const result = await updateMeetingRequiredDocument(req.params.id, req.params.documentRequirementId, req.body || {}, {
-        organizationId: user.organizationId,
-      });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Required document was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.required_document.update",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: req.params.id,
-        summary: "Meeting required document was updated.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Update meeting document failed:", error);
-      createApiError(res, 500, "UPDATE_MEETING_DOCUMENT_FAILED", "Could not update meeting document.");
-    }
-  });
-
-  app.post("/api/compliance-meetings/:id/outcome", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      await requirePermission(user, "compliance.manage");
-      const result = await updateComplianceMeetingRecord(
-        req.params.id,
-        {
-          outcome: req.body?.outcome,
-          nextActionItems: req.body?.nextActionItems,
-          status: req.body?.status,
-        },
-        { organizationId: user.organizationId }
-      );
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Compliance meeting was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.outcome",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: req.params.id,
-        summary: "Compliance meeting outcome was recorded.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Record meeting outcome failed:", error);
-      createApiError(res, 500, "MEETING_OUTCOME_FAILED", "Could not record meeting outcome.");
-    }
-  });
-
-  app.post("/api/compliance-meetings/:id/cancel", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      await requirePermission(user, "compliance.manage");
-      const result = await updateComplianceMeetingRecord(req.params.id, { status: "CANCELLED" }, {
-        organizationId: user.organizationId,
-      });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Compliance meeting was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.cancel",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: req.params.id,
-        summary: "Compliance meeting was cancelled.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Cancel compliance meeting failed:", error);
-      createApiError(res, 500, "CANCEL_COMPLIANCE_FAILED", "Could not cancel meeting.");
-    }
-  });
-
-  app.post("/api/compliance-meetings/:id/archive", async (req, res) => {
-    try {
-      const user = await requireAuthenticatedUser(req, res);
-      if (!user) return;
-      await requirePermission(user, "compliance.manage");
-      const result = await archiveComplianceMeetingRecord(req.params.id, { organizationId: user.organizationId });
-      if (!result) return createApiError(res, 404, "NOT_FOUND", "Compliance meeting was not found.");
-      await auditLog({
-        actorUserId: user.id,
-        action: "compliance_meeting.archive",
-        entityType: "COMPLIANCE_MEETING",
-        entityId: req.params.id,
-        summary: "Compliance meeting was archived.",
-        before: result.before,
-        after: result.after,
-        requestContext: requestContext(req),
-      });
-      res.json({ ok: true, data: result.after });
-    } catch (error) {
-      if (error.statusCode === 403) return createApiError(res, 403, "FORBIDDEN", error.message);
-      console.error("Archive compliance meeting failed:", error);
-      createApiError(res, 500, "ARCHIVE_COMPLIANCE_FAILED", "Could not archive meeting.");
-    }
   });
 
   const dashboardSections = {

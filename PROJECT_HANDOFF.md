@@ -12,6 +12,13 @@ This handoff was prepared from the live repository, the external planning pack, 
 
 ## Latest Changes / Working Notes
 
+### 2026-07-18 - Cheque and compliance-meeting retirement prepared (not deployed)
+
+- `/cheques`, `/compliance`, and `/compliance-meetings` are now retired product surfaces; older entries below describe historical behavior and are superseded by this note.
+- The prepared code-only release removes UI/API access and blocks legacy clients from recreating feature data while preserving shared documents, tasks, audit logs, change logs, and object files.
+- A separate forward migration removes the dedicated feature data/tables, permissions, subscription flags, and associations. It must run only after a fresh verified backup, disposable restore, staging validation, and a full observation window for the code-only release.
+- Nothing in this handoff note authorizes applying the destructive migration to production. After that migration, the rollback floor is the code-only retirement release; older feature-aware application releases are incompatible.
+
 ### 2026-05-18 - Skeleton loaders everywhere and Liara deploy
 
 What changed:

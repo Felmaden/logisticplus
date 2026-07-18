@@ -177,8 +177,6 @@ const optionalQueryEnum = (values) =>
 const archiveEntityType = z.enum([
   "shipment",
   "document",
-  "cheque",
-  "compliance_meeting",
   "quotation",
   "customer",
 ]);

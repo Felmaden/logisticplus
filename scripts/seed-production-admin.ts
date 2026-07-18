@@ -42,8 +42,6 @@ const tenantPermissionDescriptions = {
   "chat.manage_groups": "Manage company chat groups",
   "users.manage": "Manage company users",
   "users.promote": "Promote company users",
-  "cheques.manage": "Manage cheques",
-  "compliance.manage": "Manage compliance meetings",
   "quotations.manage": "Manage quotations",
   "archive.view": "View company archive",
   "customer_access.manage": "Manage customer tracking access",

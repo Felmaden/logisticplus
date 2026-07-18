@@ -23,7 +23,6 @@ async function cleanupCompanyWideArtifacts(client: DbClient) {
   await client.query("DELETE FROM tasks WHERE shipment_id = $1 AND title LIKE 'E2E company-wide%'", [shipmentId]);
   await client.query("DELETE FROM shipment_workflow_instances WHERE shipment_id = $1", [shipmentId]);
   await client.query("DELETE FROM documents WHERE title LIKE 'E2E company-wide%'");
-  await client.query("DELETE FROM compliance_meetings WHERE title LIKE 'E2E company-wide%'");
   await client.query("DELETE FROM quotations WHERE customer_name LIKE 'E2E company-wide%'");
   await client.query("DELETE FROM user_records WHERE collection = 'commercialCards' AND item_id LIKE 'e2e-company-wide-%'");
   const users = await client.query("SELECT id FROM app_users WHERE email LIKE 'e2e-company-wide-%@example.test'");
@@ -259,7 +258,7 @@ test.describe.serial("company-wide operational data sharing", () => {
     }
   });
 
-  test("shares quotations, compliance meetings, commercial cards, and survives legacy bootstrap saves", async () => {
+  test("shares quotations and commercial cards and survives legacy bootstrap saves", async () => {
     const owner = await loginApi();
     const contexts = [owner];
     try {
@@ -315,20 +314,6 @@ test.describe.serial("company-wide operational data sharing", () => {
       expect((await ignoredSave.json()).total).toBe(0);
       expect(await ignoredCompatibilitySnapshot(client, ignoredIds)).toEqual(beforeIgnoredSave);
 
-      const meeting = await readOk<any>(
-        await manager.post("/api/compliance-meetings", {
-          data: {
-            dateTime: "1405/03/15 10:00",
-            purpose: "E2E company-wide compliance meeting",
-            departmentName: "Operations",
-            assignedPersonId: employeeUser.id,
-            assignedPersonName: "E2E Company Wide CUSTOMER_SERVICE",
-          },
-        })
-      );
-      const operationMeetings = await readOk<any[]>(await operations.get("/api/compliance-meetings"));
-      expect(operationMeetings.some((item) => item.id === meeting.id)).toBe(true);
-
       const managerBootstrap = await bootstrap(manager, managerUser.id);
       const commercialCard = {
         id: `e2e-company-wide-card-${Date.now()}`,
@@ -364,7 +349,6 @@ test.describe.serial("company-wide operational data sharing", () => {
 
       await expectForbidden(await employee.get("/api/admin/overview"));
       await expectForbidden(await employee.get("/api/users"));
-      await expectForbidden(await operations.get("/api/cheques"));
     } finally {
       await disposeContexts(...contexts);
     }

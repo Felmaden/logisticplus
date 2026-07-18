@@ -37,8 +37,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     },
     backendFeatures: {
       chat: false,
-      cheques: false,
-      compliance: false,
       quotations: false,
       archive: true,
     },
@@ -59,8 +57,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     ],
     disabledFeatures: [
       "مدیریت کوتیشن / استعلام نرخ",
-      "مدیریت چک‌ها",
-      "جلسات کامپلاینس",
       "خروجی ماهانه",
       "سطح دسترسی و نقش‌های پیشرفته",
     ],
@@ -70,7 +66,7 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     name: "حرفه‌ای",
     badge: "پیشنهاد ما",
     audience: "برای تیم‌هایی با چند کاربر عملیاتی",
-    description: "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری، چک و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.",
+    description: "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.",
     monthlyPriceIrr: 49900000,
     annualPriceIrr: 499000000,
     limits: {
@@ -81,8 +77,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     },
     backendFeatures: {
       chat: false,
-      cheques: true,
-      compliance: true,
       quotations: true,
       archive: true,
     },
@@ -94,9 +88,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     includedFeatures: [
       "همه امکانات پلن اقتصادی",
       "مدیریت کوتیشن / استعلام نرخ",
-      "مدیریت چک‌های مرتبط با عملیات",
-      "جلسات کامپلاینس محدود",
-      "تا ۱۰ جلسه کامپلاینس در ماه",
       "مدیریت نقش‌ها و کاربران داخلی",
       "خروجی ماهانه: ماهی یک‌بار",
       "گزارش‌های کاربردی‌تر برای مدیر عملیات",
@@ -120,8 +111,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     },
     backendFeatures: {
       chat: false,
-      cheques: true,
-      compliance: true,
       quotations: true,
       archive: true,
     },
@@ -133,8 +122,6 @@ export const subscriptionPlans: SubscriptionPlan[] = [
     includedFeatures: [
       "همه امکانات پلن حرفه‌ای",
       "مدیریت کامل کوتیشن و استعلام نرخ",
-      "مدیریت کامل چک‌های عملیاتی",
-      "مدیریت کامل جلسات و مدارک کامپلاینس",
       "خروجی ماهانه: ماهی ۴ بار",
       "کنترل کامل نقش‌ها و سطح دسترسی کاربران",
       "گزارش تغییرات کامل",

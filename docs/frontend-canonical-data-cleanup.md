@@ -21,9 +21,10 @@ Implemented in this slice:
 
 ## Remaining Mock/Legacy Dependencies
 
-- `Dashboard.tsx`, `ShipmentDetail.tsx`, `Archive.tsx`, `Tasks.tsx`, `Documents.tsx`, `Customers.tsx`, `QuotageManagement.tsx`, `ChequeManagement.tsx`, `Compliance.tsx`, `ChangeLog.tsx`, `UserManagement.tsx`, `Chat.tsx`, and layout/session components still read from `useAppStore`.
+- `Dashboard.tsx`, `ShipmentDetail.tsx`, `Archive.tsx`, `Tasks.tsx`, `Documents.tsx`, `Customers.tsx`, `QuotageManagement.tsx`, `ChangeLog.tsx`, `UserManagement.tsx`, `Chat.tsx`, and layout/session components still read from `useAppStore`.
 - Legacy write helpers such as `addShipment`, `updateShipment`, `updateShipmentStatus`, and `archiveShipment` remain for compatibility, but migrated pages must not call them.
 - Browser-side fake activity log creation remains in unmigrated mock-store actions. Migrated domains should rely on backend `auditLog`.
+- Cheque and compliance-meeting pages are retired; their legacy record collections must remain ignored rather than becoming compatibility write paths again.
 
 ## Next Slice
 

@@ -17,8 +17,6 @@ const counts = {
   shipmentsPerTenant: intEnv("QA_SEED_SHIPMENTS_PER_TENANT", 260),
   tasksPerTenant: intEnv("QA_SEED_TASKS_PER_TENANT", 520),
   documentsPerTenant: intEnv("QA_SEED_DOCUMENTS_PER_TENANT", 180),
-  chequesPerTenant: intEnv("QA_SEED_CHEQUES_PER_TENANT", 160),
-  meetingsPerTenant: intEnv("QA_SEED_MEETINGS_PER_TENANT", 120),
   quotesPerTenant: intEnv("QA_SEED_QUOTES_PER_TENANT", 120),
   archiveRecordsPerTenant: intEnv("QA_SEED_ARCHIVE_RECORDS_PER_TENANT", 80),
   sessionsPerTenant: intEnv("QA_SEED_SESSIONS_PER_TENANT", 12),
@@ -91,10 +89,7 @@ async function cleanupPrefix(client) {
     "DELETE FROM change_logs WHERE entity_id LIKE $1 OR summary LIKE $2 OR before_json::text LIKE $2 OR after_json::text LIKE $2",
     "DELETE FROM document_versions WHERE document_id LIKE $1 OR storage_key LIKE $2",
     "DELETE FROM documents WHERE id LIKE $1 OR title LIKE $2 OR file_name LIKE $2",
-    "DELETE FROM meeting_required_documents WHERE id LIKE $1 OR name LIKE $2",
     "DELETE FROM archive_records WHERE id LIKE $2 OR entity_id LIKE $1 OR title LIKE $2 OR legacy_data::text LIKE $2",
-    "DELETE FROM compliance_meetings WHERE id LIKE $1 OR title LIKE $2",
-    "DELETE FROM cheques WHERE id LIKE $1 OR cheque_number LIKE $2 OR description LIKE $2",
     "DELETE FROM tasks WHERE id LIKE $1 OR title LIKE $2",
     "DELETE FROM shipment_status_events WHERE id LIKE $1",
     "DELETE FROM shipments WHERE id LIKE $1 OR shipment_code LIKE $2",
@@ -228,9 +223,6 @@ async function main() {
     const shipments = [];
     const tasks = [];
     const documents = [];
-    const cheques = [];
-    const meetings = [];
-    const requiredDocs = [];
     const quotes = [];
     const notifications = [];
     const documentVersions = [];
@@ -343,52 +335,6 @@ async function main() {
         });
       }
 
-      for (let i = 0; i < counts.chequesPerTenant; i += 1) {
-        cheques.push({
-          id: id("cheque", tenantIndex, i),
-          organization_id: tenant.organizationId,
-          owner_user_id: tenant.userId,
-          bank_name: ["Mellat", "Melli", "Saman", "Pasargad"][i % 4],
-          cheque_number: `${prefix}-CHQ-${tenantIndex}-${String(i).padStart(5, "0")}`,
-          amount: 10_000_000 + i * 1000,
-          due_date: shamsi(i, 10),
-          location: `${prefix} Finance desk`,
-          receiver: `${prefix} Receiver ${i}`,
-          status: ["ACTIVE", "CLEARED", "RETURNED"][i % 3],
-          description: `${prefix} crowded cheque`,
-          created_by_id: tenant.userId,
-          legacy_data: JSON.stringify({ qaPrefix: prefix }),
-        });
-      }
-
-      for (let i = 0; i < counts.meetingsPerTenant; i += 1) {
-        const meetingId = id("meeting", tenantIndex, i);
-        meetings.push({
-          id: meetingId,
-          organization_id: tenant.organizationId,
-          owner_user_id: tenant.userId,
-          title: `${prefix} Compliance ${tenantIndex}-${i}`,
-          organization_name: `${prefix} Department ${i % 6}`,
-          meeting_at: shamsi(i, 11),
-          location: `${prefix} Room ${i % 8}`,
-          status: ["SCHEDULED", "IN_PROGRESS", "COMPLETED", "FOLLOW_UP_REQUIRED"][i % 4],
-          assigned_to_id: tenant.userId,
-          assigned_to_name: tenant.name,
-          description: `${prefix} crowded meeting`,
-          legacy_data: JSON.stringify({ qaPrefix: prefix }),
-          created_by_id: tenant.userId,
-        });
-        requiredDocs.push({
-          id: id("meetingdoc", tenantIndex, i),
-          organization_id: tenant.organizationId,
-          meeting_id: meetingId,
-          name: `${prefix} Required certificate ${i}`,
-          required: true,
-          completed: i % 2 === 0,
-          legacy_data: JSON.stringify({ qaPrefix: prefix }),
-        });
-      }
-
       for (let i = 0; i < counts.quotesPerTenant; i += 1) {
         const customer = customers[tenantIndex * counts.customersPerTenant + (i % Math.max(1, counts.customersPerTenant))];
         quotes.push({
@@ -439,9 +385,7 @@ async function main() {
           { entity_type: "shipment", entity_id: id("shipment", tenantIndex, i % Math.max(1, counts.shipmentsPerTenant)) },
           { entity_type: "task", entity_id: id("task", tenantIndex, i % Math.max(1, counts.tasksPerTenant)) },
           { entity_type: "document", entity_id: id("document", tenantIndex, i % Math.max(1, counts.documentsPerTenant)) },
-          { entity_type: "cheque", entity_id: id("cheque", tenantIndex, i % Math.max(1, counts.chequesPerTenant)) },
           { entity_type: "quotation", entity_id: id("quote", tenantIndex, i % Math.max(1, counts.quotesPerTenant)) },
-          { entity_type: "compliance_meeting", entity_id: id("meeting", tenantIndex, i % Math.max(1, counts.meetingsPerTenant)) },
         ];
         const kind = kinds[i % kinds.length];
         archiveRecords.push({
@@ -496,9 +440,6 @@ async function main() {
     await insertRows(client, "tasks", Object.keys(tasks[0] || {}), tasks);
     await insertRows(client, "documents", Object.keys(documents[0] || {}), documents);
     await insertRows(client, "document_versions", Object.keys(documentVersions[0] || {}), documentVersions);
-    await insertRows(client, "cheques", Object.keys(cheques[0] || {}), cheques);
-    await insertRows(client, "compliance_meetings", Object.keys(meetings[0] || {}), meetings);
-    await insertRows(client, "meeting_required_documents", Object.keys(requiredDocs[0] || {}), requiredDocs);
     await insertRows(client, "quotations", Object.keys(quotes[0] || {}), quotes);
     await insertRows(client, "archive_records", Object.keys(archiveRecords[0] || {}), archiveRecords);
     await insertRows(client, "notifications", Object.keys(notifications[0] || {}), notifications);
@@ -540,36 +481,6 @@ async function main() {
         version: 1,
       });
     }
-    for (const cheque of cheques) {
-      await syncUserRecord(client, cheque.owner_user_id, cheque.organization_id, "cheques", cheque.id, {
-        id: cheque.id,
-        bankName: cheque.bank_name,
-        chequeNumber: cheque.cheque_number,
-        amount: Number(cheque.amount),
-        dueDate: cheque.due_date,
-        location: cheque.location,
-        receiver: cheque.receiver,
-        status: cheque.status,
-        description: cheque.description,
-        createdAt: iso(-1),
-      });
-    }
-    for (const meeting of meetings) {
-      await syncUserRecord(client, meeting.owner_user_id, meeting.organization_id, "appointments", meeting.id, {
-        id: meeting.id,
-        dateTime: meeting.meeting_at,
-        departmentName: meeting.organization_name,
-        purpose: meeting.title,
-        requiredDocuments: [],
-        assignedPersonId: meeting.assigned_to_id,
-        assignedPersonName: meeting.assigned_to_name,
-        status: meeting.status,
-        outcome: "",
-        nextActionItems: "",
-        reminderSent: false,
-        createdAt: iso(-1),
-      });
-    }
     for (const quote of quotes) {
       await syncUserRecord(client, quote.owner_user_id, quote.organization_id, "quotes", quote.id, {
         id: quote.id,
@@ -606,15 +517,13 @@ async function main() {
       tasks: tasks.length,
       documents: documents.length,
       documentVersions: documentVersions.length,
-      cheques: cheques.length,
-      complianceMeetings: meetings.length,
       quotations: quotes.length,
       archiveRecords: archiveRecords.length,
       notifications: notifications.length,
       sessions: sessions.length,
       rateLimitBuckets: rateLimitBuckets.length,
       changeLogs: changeLogs.length,
-      userRecords: customers.length + shipments.length + tasks.length + documents.length + cheques.length + meetings.length + quotes.length,
+      userRecords: customers.length + shipments.length + tasks.length + documents.length + quotes.length,
     });
 
     await client.query("COMMIT");

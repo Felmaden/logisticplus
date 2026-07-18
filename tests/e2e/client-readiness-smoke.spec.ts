@@ -17,8 +17,6 @@ const protectedRoutes = [
   "/customers/c1",
   "/tasks",
   "/documents",
-  "/compliance-meetings",
-  "/cheques",
   "/commercial-cards",
   "/archive",
   "/search",
@@ -128,8 +126,6 @@ test.describe.serial("client-readiness route smoke", () => {
         await expectBackForwardWorks(page, protectedRoutes[0], protectedRoutes[1], `${viewport.name} protected`);
         await ensureLoggedIn(page);
 
-        await page.goto("/compliance", { waitUntil: "domcontentloaded" });
-        await expect(page).toHaveURL(/\/compliance-meetings$/);
         await page.goto("/quotage", { waitUntil: "domcontentloaded" });
         await expect(page).toHaveURL(/\/dashboard$/);
         await page.goto("/quotations", { waitUntil: "domcontentloaded" });

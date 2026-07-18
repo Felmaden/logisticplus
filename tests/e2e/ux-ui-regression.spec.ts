@@ -53,20 +53,6 @@ async function ownerOrganizationId() {
   }
 }
 
-function validManualShipmentCode(sequence = (Date.now() % 899) + 100) {
-  const parts = new Intl.DateTimeFormat("en-US-u-ca-persian", {
-    timeZone: "Asia/Tehran",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const valueByType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const year = String(valueByType.year || "").padStart(4, "0");
-  const month = String(valueByType.month || "").padStart(2, "0");
-  const day = String(valueByType.day || "").padStart(2, "0");
-  return `${year}${month}${day}${String(sequence).padStart(3, "0")}`;
-}
-
 async function seedLegacyShipmentWithoutSteps(id: string, options: { organizationId?: string | null } = {}) {
   const client = await dbClient();
   const shipment = {
@@ -186,7 +172,7 @@ test.describe.serial("UX/UI regression sweep", () => {
     await loginViaUi(page);
 
     const api = await loginApi();
-    const trackingNumber = validManualShipmentCode();
+    const trackingNumber = await nextValidShipmentCode();
     try {
       const shipment = await readOk<any>(
         await api.post("/api/shipments", {
@@ -541,7 +527,7 @@ test.describe.serial("UX/UI regression sweep", () => {
 
   test("core public and protected routes have no obvious desktop/mobile UI breakage", async ({ browser }) => {
     const publicRoutes = ["/", "/signup", "/contact", "/login"];
-    const protectedRoutes = ["/dashboard", "/daily-status", "/shipments", "/customers", "/tasks", "/documents", "/cheques", "/commercial-cards", "/compliance-meetings", "/archive", "/management"];
+    const protectedRoutes = ["/dashboard", "/daily-status", "/shipments", "/customers", "/tasks", "/documents", "/commercial-cards", "/archive", "/management"];
     const viewports = [
       { width: 1280, height: 800 },
       { width: 390, height: 844 },
@@ -571,12 +557,8 @@ test.describe.serial("UX/UI regression sweep", () => {
     }
   });
 
-  test("legacy routes redirect and disabled admin and quotation UI routes stay unavailable", async ({ page }) => {
+  test("legacy quotation and disabled admin UI routes stay unavailable", async ({ page }) => {
     await loginViaUi(page);
-
-    await page.goto("/compliance");
-    await expect(page).toHaveURL(/\/compliance-meetings$/);
-    await expect(page.locator("body")).not.toBeEmpty();
 
     await page.goto("/quotage");
     await expect(page).toHaveURL(/\/dashboard$/);

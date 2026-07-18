@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { format } from "date-fns-jalali";
 import { Sidebar, TopBar } from "./Navbar";
 import { MobileBottomNav } from "./MobileBottomNav";
 import { ProtectedContentSkeleton, ProtectedShellSkeleton } from "@/src/components/SkeletonStates";
@@ -74,34 +73,6 @@ function ThemeSync() {
       root.classList.remove("dark");
     }
   }, [currentTheme]);
-
-  return null;
-}
-
-function ComplianceSync() {
-  const currentUser = useAppStore((state) => state.currentUser);
-  const appointments = useAppStore((state) => state.appointments);
-  const updateAppointment = useAppStore((state) => state.updateAppointment);
-  const addNotification = useAppStore((state) => state.addNotification);
-
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const todayStr = format(new Date(), "yyyy/MM/dd");
-    const todayApps = appointments.filter(
-      (app) => app.assignedPersonId === currentUser.id && app.dateTime.startsWith(todayStr) && !app.reminderSent
-    );
-
-    todayApps.forEach((app) => {
-      addNotification({
-        title: "ÛŒØ§Ø¯Ø¢ÙˆØ±ÛŒ Ø¬Ù„Ø³Ù‡ Ø§Ù…Ø±ÙˆØ²",
-        message: `Ø´Ù…Ø§ Ø§Ù…Ø±ÙˆØ² ÛŒÚ© Ø¬Ù„Ø³Ù‡ Ø¯Ø§Ø±ÛŒØ¯: ${app.purpose} (Ø³Ø§Ø¹Øª ${app.dateTime.split(" ")[1]})`,
-        type: "URGENT",
-        link: "/compliance-meetings",
-      });
-      updateAppointment(app.id, { reminderSent: true });
-    });
-  }, [currentUser, appointments, updateAppointment, addNotification]);
 
   return null;
 }
@@ -276,7 +247,6 @@ export default function ProtectedAppLayout({
   return (
     <div className="dashboard-theme app-shell flex h-screen overflow-hidden bg-background text-foreground" dir="rtl">
       <ThemeSync />
-      {hasHydratedFromDatabase ? <ComplianceSync /> : null}
       <Sidebar />
       <div className="relative flex h-full min-w-0 flex-1 flex-col">
         <TopBar />

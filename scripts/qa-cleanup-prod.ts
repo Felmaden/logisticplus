@@ -85,11 +85,6 @@ const tableSpecs = [
       OR document_id IN (SELECT id FROM documents WHERE id LIKE $1 OR title LIKE $2 OR file_name LIKE $2 OR storage_key LIKE $2 OR legacy_data::text LIKE $2)`,
   },
   {
-    name: "meeting_required_documents",
-    where: `id LIKE $1 OR name LIKE $2 OR file_name LIKE $2 OR legacy_data::text LIKE $2
-      OR meeting_id IN (SELECT id FROM compliance_meetings WHERE id LIKE $1 OR title LIKE $2 OR organization_name LIKE $2 OR legacy_data::text LIKE $2)`,
-  },
-  {
     name: "shipment_status_events",
     where: `id LIKE $1 OR public_label LIKE $2 OR public_description LIKE $2
       OR shipment_id IN (SELECT id FROM shipments WHERE id LIKE $1 OR shipment_code LIKE $2 OR customer_name LIKE $2 OR legacy_data::text LIKE $2)`,
@@ -105,14 +100,6 @@ const tableSpecs = [
   {
     name: "tasks",
     where: "id LIKE $1 OR title LIKE $2 OR description LIKE $2 OR legacy_data::text LIKE $2",
-  },
-  {
-    name: "cheques",
-    where: "id LIKE $1 OR cheque_number LIKE $2 OR location LIKE $2 OR receiver LIKE $2 OR description LIKE $2 OR legacy_data::text LIKE $2",
-  },
-  {
-    name: "compliance_meetings",
-    where: "id LIKE $1 OR title LIKE $2 OR organization_name LIKE $2 OR location LIKE $2 OR description LIKE $2 OR legacy_data::text LIKE $2",
   },
   {
     name: "quotations",

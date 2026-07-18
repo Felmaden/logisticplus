@@ -3,9 +3,16 @@ import { organizationScopeClause } from "../../shared/middleware/tenant.middlewa
 
 const LEGACY_DEMO_NOTIFICATION_IDS = new Set(["n1", "n2", "n3", "n4"]);
 const NOTIFICATION_TYPES = new Set(["INFO", "WARNING", "SUCCESS", "URGENT"]);
+const RETIRED_NOTIFICATION_SOURCE_TYPES = new Set(["CHEQUE", "APPOINTMENT", "COMPLIANCE_MEETING"]);
+const RETIRED_NOTIFICATION_ROUTE = /^\/(?:cheques|appointments|compliance|compliance-meetings)(?:\/|[?#]|$)/i;
 
 function isLegacyDemoNotification(row) {
   return LEGACY_DEMO_NOTIFICATION_IDS.has(String(row?.id || ""));
+}
+
+function isRetiredNotification(row) {
+  if (RETIRED_NOTIFICATION_SOURCE_TYPES.has(String(row?.source_type || "").toUpperCase())) return true;
+  return [row?.source_id, row?.legacy_data?.link].some((value) => RETIRED_NOTIFICATION_ROUTE.test(String(value || "")));
 }
 
 function normalizeNotificationType(type) {
@@ -14,7 +21,7 @@ function normalizeNotificationType(type) {
 }
 
 export function toUiNotification(row) {
-  if (!row || isLegacyDemoNotification(row)) return null;
+  if (!row || isLegacyDemoNotification(row) || isRetiredNotification(row)) return null;
   return {
     id: row.id,
     title: row.title,
@@ -43,6 +50,9 @@ export async function listNotifications(pool, { userId, organizationId, includeR
      FROM notifications
      WHERE user_id = $1 ${organizationFilter}
        AND ($${includeReadParam}::boolean OR read_at IS NULL)
+       AND UPPER(COALESCE(source_type, '')) NOT IN ('CHEQUE', 'APPOINTMENT', 'COMPLIANCE_MEETING')
+       AND COALESCE(source_id, '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
+       AND COALESCE(legacy_data->>'link', '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
      ORDER BY created_at DESC
      LIMIT $${limitParam}`,
     values
@@ -100,6 +110,9 @@ export async function markNotificationRead(pool, notificationId, { userId, organ
     `UPDATE notifications
      SET read_at = COALESCE(read_at, NOW())
      WHERE id = $1 AND user_id = $2 ${organizationFilter}
+       AND UPPER(COALESCE(source_type, '')) NOT IN ('CHEQUE', 'APPOINTMENT', 'COMPLIANCE_MEETING')
+       AND COALESCE(source_id, '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
+       AND COALESCE(legacy_data->>'link', '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
      RETURNING *`,
     values
   );
@@ -119,7 +132,10 @@ export async function markAllNotificationsRead(pool, { userId, organizationId } 
     `UPDATE notifications
      SET read_at = COALESCE(read_at, NOW())
      WHERE user_id = $1 ${organizationFilter}
-       AND read_at IS NULL`,
+       AND read_at IS NULL
+       AND UPPER(COALESCE(source_type, '')) NOT IN ('CHEQUE', 'APPOINTMENT', 'COMPLIANCE_MEETING')
+       AND COALESCE(source_id, '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'
+       AND COALESCE(legacy_data->>'link', '') !~* '^/(cheques|appointments|compliance|compliance-meetings)(/|[?#]|$)'`,
     values
   );
 

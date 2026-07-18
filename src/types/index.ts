@@ -882,10 +882,6 @@ export interface Notification {
   link?: string;
 }
 
-export type AppointmentStatus = "SCHEDULED" | "COMPLETED" | "CANCELLED" | "IN_PROGRESS";
-
-export type ChequeStatus = "ACTIVE" | "CLEARED" | "RETURNED" | "ARCHIVED";
-
 export type QuoteStatus = "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED";
 
 export type CargoType = "GENERAL" | "REFRIGERATED" | "HAZARDOUS" | "OVERSIZED";
@@ -912,43 +908,6 @@ export interface Quote {
   validUntil: string;
   status: QuoteStatus;
   notes?: string;
-  createdAt: string;
-  isArchived?: boolean;
-}
-
-export interface Cheque {
-  id: string;
-  bankName: string;
-  chequeNumber: string;
-  amount: number;
-  dueDate: string;
-  location: string;
-  receiver: string;
-  status: ChequeStatus;
-  description?: string;
-  createdAt: string;
-}
-
-export interface AppointmentDocument {
-  id: string;
-  name: string;
-  required: boolean;
-  completed: boolean;
-  fileName?: string;
-}
-
-export interface Appointment {
-  id: string;
-  dateTime: string;
-  departmentName: string;
-  purpose: string;
-  requiredDocuments: AppointmentDocument[];
-  assignedPersonId: string;
-  assignedPersonName: string;
-  status: AppointmentStatus;
-  outcome?: string;
-  nextActionItems?: string;
-  reminderSent: boolean;
   createdAt: string;
   isArchived?: boolean;
 }

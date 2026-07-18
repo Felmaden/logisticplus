@@ -1,10 +1,14 @@
+function normalizeRole(role) {
+  return String(role || "").toUpperCase() === "COMPLIANCE_STAFF" ? "OPERATIONS" : role;
+}
+
 export function toUiUser(row) {
   if (!row) return null;
   return {
     id: row.id,
     name: row.name,
     email: row.email,
-    role: row.role,
+    role: normalizeRole(row.role),
     avatar: row.avatar || undefined,
     isOnline: Boolean(row.is_online),
     phone: row.phone || undefined,

@@ -293,9 +293,6 @@ async function readOperation(sequence) {
     "/api/customers",
     "/api/shipments",
     "/api/tasks",
-    "/api/cheques",
-    "/api/cheques/due-soon",
-    "/api/compliance-meetings",
     "/api/quotations",
     "/api/documents",
     "/api/archive",
@@ -353,7 +350,7 @@ function isIgnorableBrowserMessage(message = "") {
 
 async function writeOperation(sequence) {
   if (writeMode !== "full") return readOperation(sequence);
-  const kind = sequence % (includeUploads ? 7 : 6);
+  const kind = sequence % (includeUploads ? 5 : 4);
 
   if (kind === 0) {
     const key = nextId("customer", sequence);
@@ -381,34 +378,8 @@ async function writeOperation(sequence) {
     });
   }
 
-  if (kind === 2) {
-    const key = nextId("cheque", sequence);
-    return jsonRequest("write:cheque", "/api/cheques", {
-      bankName: "QA Bank",
-      chequeNumber: key,
-      amount: 12345678,
-      dueDate: shamsi(sequence, 11),
-      location: `${prefix} QA desk`,
-      receiver: `${prefix} Receiver`,
-      description: `${prefix} load test cheque`,
-    });
-  }
-
-  if (kind === 3) {
-    const key = nextId("meeting", sequence);
-    return jsonRequest("write:compliance", "/api/compliance-meetings", {
-      purpose: `${prefix} Compliance ${key}`,
-      departmentName: `${prefix} QA Department`,
-      dateTime: shamsi(sequence, 12),
-      location: `${prefix} Room`,
-      assignedPersonId: currentUser.id,
-      assignedPersonName: currentUser.name,
-      requiredDocuments: [{ name: `${prefix} Certificate`, required: true, completed: false }],
-    });
-  }
-
-  if (kind === 4) return createQuotation(sequence);
-  if (kind === 5) return trackingWorkflow(sequence);
+  if (kind === 2) return createQuotation(sequence);
+  if (kind === 3) return trackingWorkflow(sequence);
   return uploadDocument(sequence);
 }
 

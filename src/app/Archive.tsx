@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { 
   Archive, 
   Ship, 
-  CreditCard, 
   FileText, 
   Search, 
   ArrowLeft,
@@ -31,19 +30,18 @@ import { Link } from "react-router-dom";
 import { differenceInDays, parseISO, addDays } from "date-fns-jalali";
 import { EmptyState, resetFiltersAction } from "@/src/components/EmptyState";
 
+const RETIRED_ENTITY_TYPES = new Set(["CHEQUE", "APPOINTMENT", "COMPLIANCE_MEETING"]);
+
 export default function ArchivePage() {
   const { 
     shipments, 
-    cheques, 
     documents, 
     deletedItems,
     restoreItem,
     permanentDelete,
     unarchiveShipment, 
-    unarchiveCheque, 
     unarchiveDocument, 
     permanentDeleteShipment, 
-    permanentDeleteCheque, 
     permanentDeleteDocument 
   } = useAppStore();
   const loadCurrentUserRecords = useAppStore(state => state.loadCurrentUserRecords);
@@ -52,10 +50,12 @@ export default function ArchivePage() {
   const [viewMode, setViewMode] = useState<"archives" | "trash">("archives");
 
   const archivedShipments = shipments.filter(s => s.isArchived);
-  const archivedCheques = cheques.filter(c => c.status === "ARCHIVED");
   const archivedDocuments = documents.filter(d => d.isArchived);
   const filterDisabledDeletedItems = (items: typeof deletedItems) =>
-    QUOTATIONS_UI_ENABLED ? items : items.filter((item) => String(item.entityType || "").toUpperCase() !== "QUOTE");
+    items.filter((item) => {
+      const entityType = String(item.entityType || "").toUpperCase();
+      return !RETIRED_ENTITY_TYPES.has(entityType) && (QUOTATIONS_UI_ENABLED || entityType !== "QUOTE");
+    });
   const visibleDeletedItems = filterDisabledDeletedItems(deletedItems);
 
   React.useEffect(() => {
@@ -64,7 +64,8 @@ export default function ArchivePage() {
       .then((payload) => {
         if (payload?.ok) {
           setApiArchiveItems((payload.data || []).filter((item: any) => (
-            QUOTATIONS_UI_ENABLED || String(item.entityType || item.type || "").toLowerCase() !== "quotation"
+            !RETIRED_ENTITY_TYPES.has(String(item.entityType || item.type || "").toUpperCase())
+            && (QUOTATIONS_UI_ENABLED || String(item.entityType || item.type || "").toLowerCase() !== "quotation")
           )));
         }
       })
@@ -105,23 +106,18 @@ export default function ArchivePage() {
         item.customerName.toLowerCase().includes(term)
       ).map(item => ({ ...item, type: "SHIPMENT" }));
 
-      const c = archivedCheques.filter(item => 
-        item.bankName.toLowerCase().includes(term) ||
-        item.chequeNumber.includes(term)
-      ).map(item => ({ ...item, type: "CHEQUE" }));
-
       const d = archivedDocuments.filter(item => 
         item.name.toLowerCase().includes(term)
       ).map(item => ({ ...item, type: "DOCUMENT" }));
 
-      return [...s, ...c, ...d].sort((a, b) => 
+      return [...s, ...d].sort((a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
     } else {
       return visibleDeletedItems
         .filter(item => {
           const itemData = item.data;
-          const searchIn = (itemData.trackingNumber || itemData.name || itemData.bankName || "").toLowerCase();
+          const searchIn = (itemData.trackingNumber || itemData.name || "").toLowerCase();
           return searchIn.includes(term);
         })
         .map(item => {
@@ -145,7 +141,7 @@ export default function ArchivePage() {
   const filteredItems = getFilteredItems();
   const resetArchiveFilters = () => setSearchTerm("");
   const archiveStats = [
-    { label: "کل آرشیو", value: archivedShipments.length + archivedCheques.length + archivedDocuments.length, icon: Archive, tone: "text-amber-600 bg-amber-500/10" },
+    { label: "کل آرشیو", value: archivedShipments.length + archivedDocuments.length, icon: Archive, tone: "text-amber-600 bg-amber-500/10" },
     { label: "محموله‌ها", value: archivedShipments.length, icon: Ship, tone: "text-blue-600 bg-blue-500/10" },
     { label: "اسناد", value: archivedDocuments.length, icon: FileText, tone: "text-emerald-600 bg-emerald-500/10" },
     { label: "سطل زباله", value: visibleDeletedItems.length, icon: Trash2, tone: "text-red-600 bg-red-500/10" },
@@ -189,7 +185,7 @@ export default function ArchivePage() {
               className="text-muted-foreground text-xs md:text-sm max-w-2xl font-medium leading-6"
             >
               {viewMode === "archives" 
-                ? "مدیریت و دسترسی سریع به تمامی اطلاعات، چک‌ها و اسناد بایگانی شده" 
+                ? "مدیریت و دسترسی سریع به محموله‌ها، مشتریان و اسناد بایگانی‌شده"
                 : "آیتم‌های حذف شده به مدت ۷ روز نگهداری می‌شوند و سپس به طور خودکار حذف خواهند شد"}
             </motion.p>
           </div>
@@ -277,8 +273,7 @@ export default function ArchivePage() {
                       <div className={cn(
                         "absolute right-0 top-0 bottom-0 w-1.5",
                         viewMode === "trash" ? "bg-red-500/40" :
-                        item.type === "SHIPMENT" ? "bg-amber-500/40" : 
-                        item.type === "CHEQUE" ? "bg-emerald-500/40" : "bg-blue-500/40"
+                        item.type === "SHIPMENT" ? "bg-amber-500/40" : "bg-blue-500/40"
                       )} />
                       
                       <div className="flex flex-col md:flex-row items-center gap-4 md:gap-8 flex-1 w-full">
@@ -286,19 +281,17 @@ export default function ArchivePage() {
                           "w-12 h-12 rounded-2xl border flex items-center justify-center shrink-0 shadow-inner",
                           viewMode === "trash" ? "bg-red-500/5 border-red-500/10 text-red-500" :
                           item.type === "SHIPMENT" ? "bg-amber-500/5 border-amber-500/10 text-amber-500" :
-                          item.type === "CHEQUE" ? "bg-emerald-500/5 border-emerald-500/10 text-emerald-500" :
                           "bg-blue-500/5 border-blue-500/10 text-blue-500"
                         )}>
                           {item.type === "SHIPMENT" && <Ship className="w-6 h-6" />}
-                          {item.type === "CHEQUE" && <CreditCard className="w-6 h-6" />}
                           {(item.type === "DOCUMENT" || item.type === "TASK") && <FileText className="w-6 h-6" />}
                         </div>
 
                         <div className="text-center md:text-right flex-1 min-w-0">
                           <h3 className="text-lg font-black text-foreground truncate flex items-center justify-center md:justify-start gap-3">
-                            {item.trackingNumber || item.bankName || item.name || item.title}
+                            {item.trackingNumber || item.name || item.title}
                             <Badge variant="outline" className="hidden sm:inline-flex text-[11px] font-black border-border text-muted-foreground py-0 px-2 h-5">
-                              {item.type === "SHIPMENT" ? "محموله" : item.type === "CHEQUE" ? "چک" : item.type === "TASK" ? "وظیفه" : "سند"}
+                              {item.type === "SHIPMENT" ? "محموله" : item.type === "TASK" ? "وظیفه" : "سند"}
                             </Badge>
                           </h3>
                           <p className="text-xs text-muted-foreground font-bold mt-1.5">
@@ -358,7 +351,6 @@ export default function ArchivePage() {
                                 onClick={() => {
                                   if (item.entityType) restoreArchivedItem(item);
                                   else if (item.type === "SHIPMENT") unarchiveShipment(item.id);
-                                  else if (item.type === "CHEQUE") unarchiveCheque(item.id, "CLEARED");
                                   else if (item.type === "DOCUMENT") unarchiveDocument(item.id);
                                   toast.success("مورد بازگردانی شد");
                                 }}
@@ -375,7 +367,6 @@ export default function ArchivePage() {
                                     ? deleteArchivedItem(item)
                                     : Promise.resolve().then(() => {
                                         if (item.type === "SHIPMENT") permanentDeleteShipment(item.id);
-                                        else if (item.type === "CHEQUE") permanentDeleteCheque(item.id);
                                         else if (item.type === "DOCUMENT") permanentDeleteDocument(item.id);
                                       });
                                   runDelete

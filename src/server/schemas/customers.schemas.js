@@ -69,7 +69,7 @@ export const customerParamsSchema = z.object({
 });
 
 export const customerRelatedParamsSchema = customerParamsSchema.extend({
-  related: z.enum(["shipments", "documents", "quotations", "cheques"]),
+  related: z.enum(["shipments", "documents", "quotations"]),
 });
 
 export const customerCreateBodySchema = customerMutationBaseSchema.refine(

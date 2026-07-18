@@ -1,71 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { loginApi, loginViaUi, readOk } from "./helpers";
 
-const archiveConfirmButton = /انتقال به بایگانی/;
-
-test.describe.serial("delete buttons confirm before archiving", () => {
-  test("cheque delete button opens confirmation and archives the cheque", async ({ page }) => {
-    const api = await loginApi();
-    const suffix = Date.now();
-    const cheque = await readOk<any>(
-      await api.post("/api/cheques", {
-        data: {
-          bankName: `بانک تست حذف ${suffix}`,
-          chequeNumber: `DEL-CHQ-${suffix}`,
-          amount: 1200000,
-          dueDate: "1405/01/01 10:00",
-          location: "صندوق تست",
-          receiver: "گیرنده تست",
-          status: "ACTIVE",
-        },
-      })
-    );
-    await api.dispose();
-
-    await loginViaUi(page);
-    await page.goto("/cheques");
-    await page.getByLabel(`Delete cheque ${cheque.id}`).click();
-    await expect(page.getByRole("dialog")).toContainText("بایگانی چک");
-    await page.getByRole("dialog").getByRole("button", { name: archiveConfirmButton }).click();
-    await expect(page.getByText(`DEL-CHQ-${suffix}`)).toHaveCount(0);
-  });
-
-  test("compliance delete button opens confirmation and archives the meeting", async ({ page }) => {
-    const api = await loginApi();
-    const suffix = Date.now();
-    const meeting = await readOk<any>(
-      await api.post("/api/compliance-meetings", {
-        data: {
-          dateTime: "1405/01/01 10:00",
-          departmentName: "واحد تست",
-          purpose: `جلسه تست حذف ${suffix}`,
-          assignedPersonId: "u1",
-          assignedPersonName: "Owner",
-          status: "SCHEDULED",
-          requiredDocuments: [{ id: "doc", name: "مدرک تست", required: true, completed: false }],
-        },
-      })
-    );
-    await api.dispose();
-
-    await loginViaUi(page);
-    await page.goto("/compliance-meetings");
-    await page.getByLabel(`Archive compliance meeting ${meeting.id}`).click();
-    await expect(page.getByRole("dialog")).toContainText("بایگانی نوبت");
-    await page.getByRole("dialog").getByRole("button", { name: archiveConfirmButton }).click();
-    await expect(page.getByText(`جلسه تست حذف ${suffix}`)).toHaveCount(0);
-  });
-
+test.describe.serial("disabled archive UI surfaces", () => {
   test("quotation UI archive action stays disabled while backend archive remains available", async ({ page }) => {
     const api = await loginApi();
     const suffix = Date.now();
+    const customerName = `E2E disabled quotation archive ${suffix}`;
     const quotation = await readOk<any>(
       await api.post("/api/quotations", {
         data: {
-          customerName: `مشتری تست حذف ${suffix}`,
+          customerName,
           customerPhone: "09120000000",
-          originCity: "تهران",
-          destinationCity: "بندرعباس",
+          originCity: "Tehran",
+          destinationCity: "Bandar Abbas",
           cargoType: "GENERAL",
           weight: 4,
           dimensions: "2x2x2",
@@ -93,6 +40,6 @@ test.describe.serial("delete buttons confirm before archiving", () => {
     await page.goto("/quotations");
     await expect(page).toHaveURL(/\/dashboard$/);
     await expect(page.getByLabel(`Archive quotation ${quotation.id}`)).toHaveCount(0);
-    await expect(page.getByText(`مشتری تست حذف ${suffix}`)).toHaveCount(0);
+    await expect(page.getByText(customerName)).toHaveCount(0);
   });
 });

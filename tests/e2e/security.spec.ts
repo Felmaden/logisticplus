@@ -120,8 +120,6 @@ test.describe.serial("security regression harness", () => {
       "/api/tasks/t1",
       "/api/organization/members",
       "/api/documents/doc1",
-      "/api/cheques/chq1",
-      "/api/compliance-meetings/ap1",
       "/api/quotations/q1",
       "/api/audit-logs",
       "/api/chat/threads",
@@ -241,8 +239,6 @@ test.describe.serial("security regression harness", () => {
     await readOk(await owner.get("/api/customers/c1"));
     await readOk(await owner.get("/api/tasks/t1"));
     await readOk(await owner.get("/api/documents/doc1"));
-    await readOk(await owner.get("/api/cheques/chq1"));
-    await readOk(await owner.get("/api/compliance-meetings/ap1"));
     await readOk(await owner.get("/api/quotations/q1"));
 
     await expectUnavailable(await tenant.get("/api/customers/c1"));
@@ -265,15 +261,6 @@ test.describe.serial("security regression harness", () => {
     await expectUnavailable(await tenant.patch("/api/documents/doc1", { data: { title: "Cross tenant document" } }));
     await expectUnavailable(await tenant.post("/api/documents/doc1/archive"));
     await expectUnavailable(await tenant.patch("/api/documents/doc1/visibility", { data: { visibility: "customer_visible" } }));
-    await expectUnavailable(await tenant.get("/api/cheques/chq1"));
-    await expectUnavailable(await tenant.patch("/api/cheques/chq1", { data: { location: "Cross tenant location" } }));
-    await expectUnavailable(await tenant.post("/api/cheques/chq1/status", { data: { status: "RETURNED" } }));
-    await expectUnavailable(await tenant.post("/api/cheques/chq1/archive"));
-    await expectUnavailable(await tenant.get("/api/compliance-meetings/ap1"));
-    await expectUnavailable(await tenant.patch("/api/compliance-meetings/ap1", { data: { location: "Cross tenant room" } }));
-    await expectUnavailable(await tenant.post("/api/compliance-meetings/ap1/outcome", { data: { outcome: "Cross tenant" } }));
-    await expectUnavailable(await tenant.post("/api/compliance-meetings/ap1/cancel"));
-    await expectUnavailable(await tenant.post("/api/compliance-meetings/ap1/archive"));
     await expectUnavailable(await tenant.get("/api/quotations/q1"));
     await expectUnavailable(await tenant.patch("/api/quotations/q1", { data: { notes: "Cross tenant quotation" } }));
     await expectUnavailable(await tenant.post("/api/quotations/q1/archive"));
@@ -302,12 +289,10 @@ test.describe.serial("security regression harness", () => {
     const operationsEmail = await createCompanyUser(owner, "OPERATIONS", "e2e-operations-role");
 
     const finance = await loginApi(financeEmail, USER_PASSWORD);
-    await readOk(await finance.get("/api/cheques"));
     await readOk(await finance.get("/api/tasks/my"));
     await readOk(await finance.get("/api/shipments"));
     await readOk(await finance.get("/api/documents"));
     await readOk(await finance.get("/api/quotations"));
-    await readOk(await finance.get("/api/compliance-meetings"));
     await expectForbidden(await finance.get("/api/admin/overview"));
 
     const operations = await loginApi(operationsEmail, USER_PASSWORD);
@@ -315,8 +300,6 @@ test.describe.serial("security regression harness", () => {
     await readOk(await operations.get("/api/shipments"));
     await readOk(await operations.get("/api/documents"));
     await readOk(await operations.get("/api/quotations"));
-    await readOk(await operations.get("/api/compliance-meetings"));
-    await expectForbidden(await operations.get("/api/cheques"));
     await expectForbidden(await operations.get("/api/admin/overview"));
 
     await disposeContexts(owner, finance, operations);

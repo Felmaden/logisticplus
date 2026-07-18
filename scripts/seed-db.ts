@@ -9,9 +9,7 @@ import { format } from "date-fns-jalali";
 import {
   defaultSteps,
   mockActivityLogs,
-  mockAppointments,
   mockChannels,
-  mockCheques,
   mockCustomers,
   mockDemurrage,
   mockDocuments,
@@ -113,8 +111,6 @@ function buildCollections() {
     documents: mockDocuments,
     channels: mockChannels,
     notifications: [],
-    appointments: mockAppointments,
-    cheques: mockCheques,
     quotes: mockQuotes,
     deletedItems: [],
     metadata: [

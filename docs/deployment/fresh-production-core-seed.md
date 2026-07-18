@@ -57,14 +57,15 @@ Tenant roles:
 - `CUSTOMER_SERVICE`
 - `FINANCE`
 - `QUOTATION_MANAGER`
-- `COMPLIANCE_STAFF`
 - `EMPLOYEE`
 - `CUSTOMER_VIEWER`
 
 Permissions:
 
-- Tenant permissions for dashboard, shipments, shipment steps, customers, tasks, documents, changes, chat, users, cheques, compliance, quotations, archive, and customer tracking access.
+- Tenant permissions for dashboard, shipments, shipment steps, customers, tasks, documents, changes, chat, users, quotations, archive, and customer tracking access.
 - `platform.admin` as a direct-only platform permission.
+
+Cheque/compliance permissions and the legacy `COMPLIANCE_STAFF` role are intentionally not seeded because those features are permanently retired.
 
 Other catalog rows:
 

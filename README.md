@@ -35,7 +35,7 @@ The backend is module-first under [server/src](server/src):
 
 The backend intentionally stays on runtime-safe `.js` files for now. `npm start` runs `node server.js`, and Liara can keep using the standard Node.js startup path without a separate server compile step.
 
-Some legacy support code still lives under [src/server](src/server), including AI, document storage, public tracking, request schemas, shipment workflow/template helpers, cheque/compliance helpers, and the aggregate [src/server/db.js](src/server/db.js). Do not reintroduce route or repository compatibility wrappers there for modules that already live under [server/src/modules](server/src/modules).
+Some legacy support code still lives under [src/server](src/server), including AI, document storage, public tracking, request schemas, shipment workflow/template helpers, and the aggregate [src/server/db.js](src/server/db.js). Do not reintroduce route or repository compatibility wrappers there for modules that already live under [server/src/modules](server/src/modules).
 
 ## Prerequisites
 
@@ -208,9 +208,11 @@ Public routes include:
 - `/login`
 - `/track/:token`
 
-Protected app routes require login and include dashboard, shipments, shipment detail/edit, customers, tasks, documents, compliance, cheques, quotations, archive, changelog, settings, profile, management, admin, and the disabled chat screen.
+Protected app routes require login and include dashboard, shipments, shipment detail/edit, customers, tasks, documents, quotations, archive, changelog, settings, profile, management, admin, and the disabled chat screen.
 
-Login supports password auth for users created by platform/admin flows. Chat is intentionally visible but disabled for now. Public tracking must remain customer-safe and must not expose internal notes, audit logs, staff tasks, financial details, private files, chat, or compliance internals.
+Login supports password auth for users created by platform/admin flows. Chat is intentionally visible but disabled for now. Public tracking must remain customer-safe and must not expose internal notes, audit logs, staff tasks, financial details, private files, chat, or retired-feature internals.
+
+Cheque management and compliance meetings are permanently retired. `/cheques`, `/compliance`, and `/compliance-meetings`, their APIs, permissions, seed catalogs, and dedicated database structures must not be reintroduced. Historical migrations remain immutable. Production retirement uses a code-only access-removal release followed by a separately approved destructive migration; see [docs/production-safe-cleanup-release-train.md](docs/production-safe-cleanup-release-train.md) for the rollback boundary.
 
 ## Deployment Notes
 

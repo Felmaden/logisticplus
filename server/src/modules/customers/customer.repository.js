@@ -1,5 +1,4 @@
 import { organizationScopeClause, requireOrganizationScope } from "../../shared/middleware/tenant.middleware.js";
-import { listCheques } from "../../../../src/server/repositories/cheques.js";
 import { listDocuments } from "../documents/document.repository.js";
 import { listQuotations } from "../quotations/quotation.repository.js";
 import { toCustomerPhoneNumber, toUiCustomer } from "./customer.mapper.js";
@@ -168,14 +167,6 @@ export async function listCustomerRelated(pool, id, type, { organizationId, incl
       organizationId,
       includeArchived: true,
       includeCustomerPrivateDetails: includePrivateDetails,
-    });
-  }
-  if (type === "cheques") {
-    return listCheques(pool, {
-      customerId: id,
-      organizationId,
-      includeArchived: true,
-      includeCreatedAtTieBreaker: false,
     });
   }
   return [];

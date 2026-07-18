@@ -75,7 +75,7 @@ Core catalog:
 - `subscription_plans` for `starter`, `business`, and `enterprise` from the subscription plan catalog.
 - Tenant `permissions` used by production workflows.
 - Direct-only `platform.admin` permission.
-- Tenant `roles`: `CEO`, `MANAGER`, `OPERATIONS`, `CUSTOMER_SERVICE`, `FINANCE`, `QUOTATION_MANAGER`, `COMPLIANCE_STAFF`, `EMPLOYEE`, `CUSTOMER_VIEWER`.
+- Tenant `roles`: `CEO`, `MANAGER`, `OPERATIONS`, `CUSTOMER_SERVICE`, `FINANCE`, `QUOTATION_MANAGER`, `EMPLOYEE`, `CUSTOMER_VIEWER`.
 - `role_permissions` for tenant access, excluding `platform.admin`.
 
 Initial admin:
