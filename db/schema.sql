@@ -316,9 +316,6 @@ ALTER TABLE IF EXISTS user_records ADD COLUMN IF NOT EXISTS organization_id TEXT
 ALTER TABLE IF EXISTS shipments ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
 ALTER TABLE IF EXISTS shipment_status_events ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
 ALTER TABLE IF EXISTS tasks ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
-ALTER TABLE IF EXISTS cheques ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
-ALTER TABLE IF EXISTS compliance_meetings ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
-ALTER TABLE IF EXISTS meeting_required_documents ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
 ALTER TABLE IF EXISTS quotations ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
 ALTER TABLE IF EXISTS archive_records ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
 ALTER TABLE IF EXISTS chat_threads ADD COLUMN IF NOT EXISTS organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE;
@@ -973,67 +970,6 @@ BEGIN
   END IF;
 END $$;
 
-CREATE TABLE IF NOT EXISTS cheques (
-  id TEXT PRIMARY KEY,
-  organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
-  owner_user_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
-  bank_name TEXT NOT NULL,
-  cheque_number TEXT NOT NULL,
-  amount NUMERIC NOT NULL DEFAULT 0,
-  currency TEXT NOT NULL DEFAULT 'IRR',
-  due_date TEXT,
-  location TEXT,
-  receiver TEXT,
-  status TEXT NOT NULL DEFAULT 'ACTIVE',
-  description TEXT,
-  assigned_to_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
-  customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
-  legacy_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-  archived_at TIMESTAMPTZ,
-  created_by_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (owner_user_id, cheque_number)
-);
-
-CREATE TABLE IF NOT EXISTS compliance_meetings (
-  id TEXT PRIMARY KEY,
-  organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
-  owner_user_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
-  title TEXT NOT NULL,
-  organization_name TEXT,
-  meeting_at TEXT NOT NULL,
-  location TEXT,
-  status TEXT NOT NULL DEFAULT 'SCHEDULED',
-  assigned_to_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
-  assigned_to_name TEXT,
-  description TEXT,
-  outcome TEXT,
-  next_action_items TEXT,
-  reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,
-  related_customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
-  related_shipment_id TEXT REFERENCES shipments(id) ON DELETE SET NULL,
-  legacy_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-  archived_at TIMESTAMPTZ,
-  created_by_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS meeting_required_documents (
-  id TEXT PRIMARY KEY,
-  organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
-  meeting_id TEXT NOT NULL REFERENCES compliance_meetings(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  required BOOLEAN NOT NULL DEFAULT TRUE,
-  completed BOOLEAN NOT NULL DEFAULT FALSE,
-  file_name TEXT,
-  document_id TEXT,
-  legacy_data JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS quotations (
   id TEXT PRIMARY KEY,
   organization_id TEXT REFERENCES organizations(id) ON DELETE CASCADE,
@@ -1224,8 +1160,6 @@ CREATE TABLE IF NOT EXISTS documents (
   uploaded_by_name TEXT,
   shipment_id TEXT REFERENCES shipments(id) ON DELETE SET NULL,
   customer_id TEXT REFERENCES customers(id) ON DELETE SET NULL,
-  meeting_id TEXT,
-  cheque_id TEXT,
   quotation_id TEXT,
   visibility TEXT NOT NULL DEFAULT 'internal',
   legacy_data JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -1257,19 +1191,6 @@ CREATE TABLE IF NOT EXISTS document_versions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (document_id, version)
 );
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'meeting_required_documents_document_id_fkey'
-  ) THEN
-    ALTER TABLE meeting_required_documents
-      ADD CONSTRAINT meeting_required_documents_document_id_fkey
-      FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE SET NULL;
-  END IF;
-END $$;
 
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
@@ -1490,15 +1411,6 @@ CREATE INDEX IF NOT EXISTS tasks_workflow_step_idx ON tasks (organization_id, wo
 CREATE INDEX IF NOT EXISTS tasks_workflow_blocker_idx ON tasks (organization_id, workflow_blocker_id);
 CREATE INDEX IF NOT EXISTS task_events_task_created_idx ON task_events (task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS task_events_org_created_idx ON task_events (organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS cheques_due_date_idx ON cheques (due_date);
-CREATE INDEX IF NOT EXISTS cheques_status_idx ON cheques (status);
-CREATE INDEX IF NOT EXISTS cheques_owner_idx ON cheques (owner_user_id);
-CREATE INDEX IF NOT EXISTS cheques_organization_idx ON cheques (organization_id);
-CREATE INDEX IF NOT EXISTS compliance_meetings_meeting_at_idx ON compliance_meetings (meeting_at);
-CREATE INDEX IF NOT EXISTS compliance_meetings_status_idx ON compliance_meetings (status);
-CREATE INDEX IF NOT EXISTS compliance_meetings_assigned_to_idx ON compliance_meetings (assigned_to_id);
-CREATE INDEX IF NOT EXISTS compliance_meetings_organization_idx ON compliance_meetings (organization_id);
-CREATE INDEX IF NOT EXISTS meeting_required_documents_meeting_idx ON meeting_required_documents (meeting_id);
 CREATE INDEX IF NOT EXISTS quotations_owner_idx ON quotations (owner_user_id);
 CREATE INDEX IF NOT EXISTS quotations_organization_idx ON quotations (organization_id);
 CREATE INDEX IF NOT EXISTS quotations_status_idx ON quotations (status);
@@ -1554,8 +1466,6 @@ CREATE INDEX IF NOT EXISTS shipments_org_id_idx ON shipments (organization_id, i
 CREATE INDEX IF NOT EXISTS tasks_org_id_idx ON tasks (organization_id, id);
 CREATE INDEX IF NOT EXISTS documents_org_id_idx ON documents (organization_id, id);
 CREATE INDEX IF NOT EXISTS document_versions_org_document_idx ON document_versions (organization_id, document_id);
-CREATE INDEX IF NOT EXISTS cheques_org_id_idx ON cheques (organization_id, id);
-CREATE INDEX IF NOT EXISTS compliance_meetings_org_id_idx ON compliance_meetings (organization_id, id);
 CREATE INDEX IF NOT EXISTS quotations_org_id_idx ON quotations (organization_id, id);
 CREATE INDEX IF NOT EXISTS archive_records_org_entity_lookup_idx ON archive_records (organization_id, entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS billing_payments_org_id_idx ON billing_payments (organization_id, id);
@@ -1565,14 +1475,10 @@ CREATE INDEX IF NOT EXISTS customers_org_created_idx ON customers (organization_
 CREATE INDEX IF NOT EXISTS shipments_org_created_idx ON shipments (organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS tasks_org_created_idx ON tasks (organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS documents_org_created_idx ON documents (organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS cheques_org_created_idx ON cheques (organization_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS compliance_meetings_org_created_idx ON compliance_meetings (organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS quotations_org_created_idx ON quotations (organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS customers_org_active_updated_idx ON customers (organization_id, updated_at DESC) WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS shipments_org_active_updated_idx ON shipments (organization_id, updated_at DESC) WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS documents_org_active_updated_idx ON documents (organization_id, updated_at DESC) WHERE archived_at IS NULL;
-CREATE INDEX IF NOT EXISTS cheques_org_active_updated_idx ON cheques (organization_id, updated_at DESC) WHERE archived_at IS NULL;
-CREATE INDEX IF NOT EXISTS compliance_meetings_org_active_updated_idx ON compliance_meetings (organization_id, updated_at DESC) WHERE archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS quotations_org_active_updated_idx ON quotations (organization_id, updated_at DESC) WHERE archived_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS shipments_customer_access_token_hash_unique_idx ON shipments (customer_access_token_hash) WHERE customer_access_token_hash IS NOT NULL;
 

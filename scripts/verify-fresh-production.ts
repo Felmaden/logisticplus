@@ -18,6 +18,19 @@ import {
 const { Client } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
+const RETIRED_TABLES = [
+  "cheques",
+  "compliance_meetings",
+  "meeting_required_documents",
+  "ai_business_search_index",
+  "organization_ai_memory",
+  "organization_ai_memory_items",
+];
+const RETIRED_DOCUMENT_COLUMNS = ["meeting_id", "cheque_id"];
+const RETIRED_PERMISSIONS = ["cheques.manage", "compliance.manage"];
+const RETIRED_SUBSCRIPTION_FEATURES = ["cheques", "compliance"];
+const STALE_BUSINESS_PLAN_DESCRIPTION = "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری، چک و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.";
+const CURRENT_BUSINESS_PLAN_DESCRIPTION = subscriptionPlans.find((plan) => plan.id === "business")?.description || "";
 
 function isDirectRun() {
   return Boolean(process.argv[1]) && path.resolve(process.argv[1]) === __filename;
@@ -52,6 +65,11 @@ async function requireCount(client: any, sql: string, params: unknown[], message
   return count;
 }
 
+async function requireZero(client: any, sql: string, params: unknown[], message: string) {
+  const count = await countQuery(client, sql, params);
+  if (count !== 0) fail(`${message} Found ${count}.`);
+}
+
 async function verifySchema(client: any) {
   const migrations = await countQuery(client, "SELECT COUNT(*)::int AS count FROM schema_migrations");
   if (migrations < 1) fail("No migrations are recorded in schema_migrations.");
@@ -82,7 +100,32 @@ async function verifySchema(client: any) {
       `Missing required table: ${table}`
     );
   }
-  return { migrations };
+
+  for (const table of RETIRED_TABLES) {
+    await requireZero(
+      client,
+      "SELECT COUNT(*)::int AS count FROM pg_class WHERE oid = to_regclass($1)",
+      [`public.${table}`],
+      `Retired feature table still exists: ${table}.`
+    );
+  }
+
+  await requireZero(
+    client,
+    `SELECT COUNT(*)::int AS count
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'documents'
+       AND column_name = ANY($1::text[])`,
+    [RETIRED_DOCUMENT_COLUMNS],
+    "Retired cheque/compliance document linkage columns still exist."
+  );
+
+  return {
+    migrations,
+    retiredTablesVerifiedAbsent: RETIRED_TABLES.length,
+    retiredDocumentColumnsVerifiedAbsent: RETIRED_DOCUMENT_COLUMNS.length,
+  };
 }
 
 async function verifyCatalog(client: any) {
@@ -95,6 +138,24 @@ async function verifyCatalog(client: any) {
     );
   }
 
+  if (!CURRENT_BUSINESS_PLAN_DESCRIPTION) fail("Current business subscription plan description is missing from source.");
+  await requireZero(
+    client,
+    `SELECT COUNT(*)::int AS count
+     FROM subscription_plans
+     WHERE id = 'business' AND description = $1`,
+    [STALE_BUSINESS_PLAN_DESCRIPTION],
+    "Business subscription plan still contains the retired cheque description."
+  );
+  await requireCount(
+    client,
+    `SELECT COUNT(*)::int AS count
+     FROM subscription_plans
+     WHERE id = 'business' AND description = $1`,
+    [CURRENT_BUSINESS_PLAN_DESCRIPTION],
+    "Business subscription plan description does not match the current source description."
+  );
+
   for (const permission of [...Object.keys(tenantPermissionDescriptions), "platform.admin"]) {
     await requireCount(
       client,
@@ -103,6 +164,15 @@ async function verifyCatalog(client: any) {
       `Missing permission: ${permission}`
     );
   }
+
+  await requireZero(
+    client,
+    `SELECT COUNT(*)::int AS count
+     FROM permissions
+     WHERE LOWER(key) = ANY($1::text[])`,
+    [RETIRED_PERMISSIONS],
+    "Retired cheque/compliance permissions still exist."
+  );
 
   for (const role of Object.keys(rolePermissions)) {
     await requireCount(
@@ -124,6 +194,44 @@ async function verifyCatalog(client: any) {
       );
     }
   }
+
+  await requireZero(
+    client,
+    "SELECT COUNT(*)::int AS count FROM roles WHERE UPPER(name) = 'COMPLIANCE_STAFF'",
+    [],
+    "Retired COMPLIANCE_STAFF role still exists."
+  );
+  await requireCount(
+    client,
+    "SELECT COUNT(*)::int AS count FROM roles WHERE UPPER(name) = 'FINANCE'",
+    [],
+    "FINANCE role must remain after retiring cheque-specific access."
+  );
+
+  await requireZero(
+    client,
+    `SELECT COUNT(*)::int AS count
+     FROM subscription_plans plans
+     WHERE EXISTS (
+       SELECT 1
+       FROM jsonb_object_keys(COALESCE(plans.features, '{}'::jsonb)) AS feature(feature_name)
+       WHERE LOWER(feature.feature_name) = ANY($1::text[])
+     )`,
+    [RETIRED_SUBSCRIPTION_FEATURES],
+    "Retired cheque/compliance keys still exist in subscription plan features."
+  );
+  await requireZero(
+    client,
+    `SELECT COUNT(*)::int AS count
+     FROM organization_subscriptions subscriptions
+     WHERE EXISTS (
+       SELECT 1
+       FROM jsonb_object_keys(COALESCE(subscriptions.limits_override, '{}'::jsonb)) AS override(override_name)
+       WHERE LOWER(override.override_name) = ANY($1::text[])
+     )`,
+    [RETIRED_SUBSCRIPTION_FEATURES],
+    "Retired cheque/compliance keys still exist in subscription overrides."
+  );
 
   for (const mapping of PREDEFINED_SHIPMENT_TYPE_WORKFLOW_MAPPINGS) {
     await requireCount(
@@ -230,6 +338,9 @@ async function verifyCatalog(client: any) {
     workflowTemplates: PREDEFINED_SHIPMENT_TYPE_WORKFLOW_MAPPINGS.length,
     customsCatalogSteps: customsCatalogCount,
     importCustomsTemplateSteps: importCustomsStepCount,
+    retiredPermissionsVerifiedAbsent: RETIRED_PERMISSIONS.length,
+    retiredSubscriptionFeaturesVerifiedAbsent: RETIRED_SUBSCRIPTION_FEATURES.length,
+    businessPlanDescriptionVerified: true,
   };
 }
 

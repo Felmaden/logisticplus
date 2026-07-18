@@ -5,12 +5,23 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { subscriptionPlans } from "../src/lib/subscriptionPlans.ts";
 
 const { Client } = pg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
+const STALE_BUSINESS_PLAN_DESCRIPTION = "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری، چک و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.";
+const CURRENT_BUSINESS_PLAN_DESCRIPTION = subscriptionPlans.find((plan) => plan.id === "business")?.description || "";
+const RETIRED_TABLES = [
+  "cheques",
+  "compliance_meetings",
+  "meeting_required_documents",
+  "ai_business_search_index",
+  "organization_ai_memory",
+  "organization_ai_memory_items",
+];
 
 const mode = process.argv[2] || "fresh";
 const isCurrentSchemaMode = mode === "current-schema";
@@ -126,6 +137,20 @@ async function indexExists(client, indexName: string) {
   return Boolean(result.rows[0]?.name);
 }
 
+async function columnExists(client, tableName: string, columnName: string) {
+  const result = await client.query(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = $1
+         AND column_name = $2
+     ) AS exists`,
+    [tableName, columnName]
+  );
+  return Boolean(result.rows[0]?.exists);
+}
+
 async function expectMutationBlocked(client, sql: string, params: unknown[]) {
   try {
     await client.query(sql, params);
@@ -145,6 +170,10 @@ async function verifySchema() {
       "customers",
       "shipments",
       "documents",
+      "subscription_plans",
+      "organization_subscriptions",
+      "permissions",
+      "roles",
       "change_logs",
       "audit_logs",
     ];
@@ -152,6 +181,89 @@ async function verifySchema() {
       if (!(await tableExists(client, tableName))) {
         throw new Error(`Missing required table after migrations: ${tableName}`);
       }
+    }
+
+    for (const tableName of RETIRED_TABLES) {
+      if (await tableExists(client, tableName)) {
+        throw new Error(`Retired feature table still exists after migrations: ${tableName}`);
+      }
+    }
+
+    for (const columnName of ["meeting_id", "cheque_id"]) {
+      if (await columnExists(client, "documents", columnName)) {
+        throw new Error(`Retired feature column still exists after migrations: documents.${columnName}`);
+      }
+    }
+
+    const retiredPermissions = await client.query(
+      `SELECT key
+       FROM permissions
+       WHERE LOWER(key) = ANY($1::text[])`,
+      [["cheques.manage", "compliance.manage"]]
+    );
+    if (retiredPermissions.rowCount > 0) {
+      throw new Error(`Retired permissions still exist after migrations: ${retiredPermissions.rows.map((row) => row.key).join(", ")}`);
+    }
+
+    const retiredRoles = await client.query(
+      `SELECT name
+       FROM roles
+       WHERE UPPER(name) = ANY($1::text[])`,
+      [["COMPLIANCE_STAFF", "FINANCE"]]
+    );
+    const roleNames = new Set(retiredRoles.rows.map((row) => String(row.name).toUpperCase()));
+    if (roleNames.has("COMPLIANCE_STAFF")) {
+      throw new Error("Retired COMPLIANCE_STAFF role still exists after migrations.");
+    }
+    if (!roleNames.has("FINANCE")) {
+      throw new Error("FINANCE role must remain after retiring cheque-specific access.");
+    }
+
+    const retiredPlanFeatures = await client.query(
+      `SELECT COUNT(*)::int AS count
+       FROM subscription_plans plans
+       WHERE EXISTS (
+         SELECT 1
+         FROM jsonb_object_keys(COALESCE(plans.features, '{}'::jsonb)) AS feature(feature_name)
+         WHERE LOWER(feature.feature_name) IN ('cheques', 'compliance')
+       )`
+    );
+    if (Number(retiredPlanFeatures.rows[0]?.count || 0) > 0) {
+      throw new Error("Retired cheque/compliance keys still exist in subscription plan features.");
+    }
+
+    const retiredSubscriptionOverrides = await client.query(
+      `SELECT COUNT(*)::int AS count
+       FROM organization_subscriptions subscriptions
+       WHERE EXISTS (
+         SELECT 1
+         FROM jsonb_object_keys(COALESCE(subscriptions.limits_override, '{}'::jsonb)) AS override(override_name)
+         WHERE LOWER(override.override_name) IN ('cheques', 'compliance')
+       )`
+    );
+    if (Number(retiredSubscriptionOverrides.rows[0]?.count || 0) > 0) {
+      throw new Error("Retired cheque/compliance keys still exist in subscription overrides.");
+    }
+
+    if (!CURRENT_BUSINESS_PLAN_DESCRIPTION) {
+      throw new Error("Current business subscription plan description is missing from source.");
+    }
+    const businessPlanDescription = await client.query(
+      `SELECT description
+       FROM subscription_plans
+       WHERE id = 'business'`
+    );
+    if (businessPlanDescription.rowCount > 1) {
+      throw new Error("Business subscription plan must not exist more than once after migrations.");
+    }
+    if (businessPlanDescription.rows[0]?.description === STALE_BUSINESS_PLAN_DESCRIPTION) {
+      throw new Error("Business subscription plan still contains the retired cheque description.");
+    }
+    if (
+      businessPlanDescription.rowCount === 1
+      && businessPlanDescription.rows[0].description !== CURRENT_BUSINESS_PLAN_DESCRIPTION
+    ) {
+      throw new Error("Business subscription plan description does not match the current source description.");
     }
 
     const requiredIndexes = [

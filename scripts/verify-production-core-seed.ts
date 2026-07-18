@@ -19,6 +19,19 @@ const defaultDatabaseUrl = "postgres://postgres@localhost:5432/logisticplus_prod
 const databaseUrl = process.env.PRODUCTION_CORE_SEED_TEST_DATABASE_URL || defaultDatabaseUrl;
 const adminUrl = process.env.POSTGRES_ADMIN_URL || withDatabase(databaseUrl, "postgres");
 const keepDatabase = process.env.KEEP_PRODUCTION_CORE_SEED_TEST_DB === "true";
+const RETIRED_TABLES = [
+  "cheques",
+  "compliance_meetings",
+  "meeting_required_documents",
+  "ai_business_search_index",
+  "organization_ai_memory",
+  "organization_ai_memory_items",
+];
+const RETIRED_DOCUMENT_COLUMNS = ["meeting_id", "cheque_id"];
+const RETIRED_PERMISSIONS = ["cheques.manage", "compliance.manage"];
+const RETIRED_SUBSCRIPTION_FEATURES = ["cheques", "compliance"];
+const STALE_BUSINESS_PLAN_DESCRIPTION = "برای شرکت‌هایی که چند نفر همزمان روی بار، سند، مشتری، چک و استعلام نرخ کار می‌کنند و دید مدیریتی دقیق‌تری می‌خواهند.";
+const CURRENT_BUSINESS_PLAN_DESCRIPTION = subscriptionPlans.find((plan) => plan.id === "business")?.description || "";
 
 const baseEnv = {
   DATABASE_URL: databaseUrl,
@@ -162,6 +175,57 @@ async function loadState() {
     const planResult = await client.query("SELECT id FROM subscription_plans ORDER BY id ASC");
     const roleResult = await client.query("SELECT name FROM roles ORDER BY name ASC");
     const permissionResult = await client.query("SELECT key FROM permissions ORDER BY key ASC");
+    const retirementResult = await client.query(
+      `SELECT
+         (SELECT COUNT(*)::int
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_name = ANY($1::text[])) AS retired_tables,
+         (SELECT COUNT(*)::int
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'documents'
+            AND column_name = ANY($2::text[])) AS retired_document_columns,
+         (SELECT COUNT(*)::int
+          FROM permissions
+          WHERE LOWER(key) = ANY($3::text[])) AS retired_permissions,
+         (SELECT COUNT(*)::int
+          FROM roles
+          WHERE UPPER(name) = 'COMPLIANCE_STAFF') AS retired_roles,
+         (SELECT COUNT(*)::int
+          FROM roles
+          WHERE UPPER(name) = 'FINANCE') AS retained_finance_roles,
+         (SELECT COUNT(*)::int
+          FROM subscription_plans plans
+          WHERE EXISTS (
+            SELECT 1
+            FROM jsonb_object_keys(COALESCE(plans.features, '{}'::jsonb)) AS feature(feature_name)
+            WHERE LOWER(feature.feature_name) = ANY($4::text[])
+          )) AS retired_plan_features,
+         (SELECT COUNT(*)::int
+          FROM organization_subscriptions subscriptions
+          WHERE EXISTS (
+            SELECT 1
+            FROM jsonb_object_keys(COALESCE(subscriptions.limits_override, '{}'::jsonb)) AS override(override_name)
+            WHERE LOWER(override.override_name) = ANY($4::text[])
+          )) AS retired_subscription_overrides,
+         (SELECT COUNT(*)::int
+          FROM subscription_plans
+          WHERE id = 'business'
+            AND description = $5) AS stale_business_plan_descriptions,
+         (SELECT COUNT(*)::int
+          FROM subscription_plans
+          WHERE id = 'business'
+            AND description = $6) AS current_business_plan_descriptions`,
+      [
+        RETIRED_TABLES,
+        RETIRED_DOCUMENT_COLUMNS,
+        RETIRED_PERMISSIONS,
+        RETIRED_SUBSCRIPTION_FEATURES,
+        STALE_BUSINESS_PLAN_DESCRIPTION,
+        CURRENT_BUSINESS_PLAN_DESCRIPTION,
+      ]
+    );
     const platformRoleGrant = await client.query(
       `SELECT COUNT(*)::int AS count
        FROM role_permissions rp
@@ -205,12 +269,30 @@ async function loadState() {
       plans: planResult.rows.map((row) => row.id),
       roles: roleResult.rows.map((row) => row.name),
       permissions: permissionResult.rows.map((row) => row.key),
+      retirement: retirementResult.rows[0],
       platformRoleGrants: platformRoleGrant.rows[0].count,
       admin: adminState.rows[0] || null,
       demo: demoState.rows[0],
     };
   } finally {
     await client.end();
+  }
+}
+
+function assertRetirementState(retirement: any, context: string, { requireBusinessPlan = true } = {}) {
+  expect(retirement.retired_tables === 0, `${context}: retired feature tables must remain absent.`);
+  expect(retirement.retired_document_columns === 0, `${context}: retired document linkage columns must remain absent.`);
+  expect(retirement.retired_permissions === 0, `${context}: retired permissions must remain absent.`);
+  expect(retirement.retired_roles === 0, `${context}: COMPLIANCE_STAFF role must remain absent.`);
+  expect(retirement.retained_finance_roles === 1, `${context}: FINANCE role must remain present exactly once.`);
+  expect(retirement.retired_plan_features === 0, `${context}: retired subscription plan feature keys must remain absent.`);
+  expect(retirement.retired_subscription_overrides === 0, `${context}: retired subscription override keys must remain absent.`);
+  expect(CURRENT_BUSINESS_PLAN_DESCRIPTION.length > 0, `${context}: current business plan description must exist in source.`);
+  expect(retirement.stale_business_plan_descriptions === 0, `${context}: stale cheque wording must remain absent from the business plan.`);
+  if (requireBusinessPlan) {
+    expect(retirement.current_business_plan_descriptions === 1, `${context}: business plan must match the current source description exactly once.`);
+  } else {
+    expect(retirement.current_business_plan_descriptions <= 1, `${context}: business plan must not be duplicated before the core seed.`);
   }
 }
 
@@ -331,17 +413,24 @@ async function main() {
     await runMigrationCommand();
 
     const beforeDryRun = await loadState();
+    assertRetirementState(beforeDryRun.retirement, "After migrations", { requireBusinessPlan: false });
     allOutput.push(...(await runCapturedCore(["--dry-run"])));
     const afterDryRun = await loadState();
     expect(JSON.stringify(beforeDryRun.counts) === JSON.stringify(afterDryRun.counts), "Core dry-run should not change row counts.");
 
     allOutput.push(...(await runCapturedCore([])));
     let state = await loadState();
-    for (const plan of subscriptionPlans) expect(state.plans.includes(plan.id), `Missing plan: ${plan.id}`);
+    for (const plan of subscriptionPlans) {
+      expect(state.plans.includes(plan.id), `Missing plan: ${plan.id}`);
+      for (const feature of RETIRED_SUBSCRIPTION_FEATURES) {
+        expect(!(feature in plan.backendFeatures), `Plan source must not define retired feature: ${plan.id}.${feature}`);
+      }
+    }
     for (const role of Object.keys(rolePermissions)) expect(state.roles.includes(role), `Missing role: ${role}`);
     for (const permission of [...Object.keys(tenantPermissionDescriptions), "platform.admin"]) {
       expect(state.permissions.includes(permission), `Missing permission: ${permission}`);
     }
+    assertRetirementState(state.retirement, "After first core seed");
     expect(state.platformRoleGrants === 0, "No role should grant platform.admin.");
     await expectRolePermission("CEO", "customers.create");
     await expectRolePermission("CEO", "shipments.create");
@@ -353,6 +442,7 @@ async function main() {
     const countsAfterFirstCore = state.counts;
     allOutput.push(...(await runCapturedCore([])));
     state = await loadState();
+    assertRetirementState(state.retirement, "After second core seed");
     expect(state.counts.plans === countsAfterFirstCore.plans, "Second core run should not duplicate plans.");
     expect(state.counts.permissions === countsAfterFirstCore.permissions, "Second core run should not duplicate permissions.");
     expect(state.counts.roles === countsAfterFirstCore.roles, "Second core run should not duplicate roles.");

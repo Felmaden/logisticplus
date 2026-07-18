@@ -14,6 +14,7 @@
     "db:migrate:baseline": "tsx scripts/migrate.ts baseline",
     "db:migrate:fresh:test": "tsx scripts/verify-migrations.ts fresh",
     "db:migrate:current:test": "tsx scripts/verify-migrations.ts current-schema",
+    "db:migrate:retirement:test": "tsx scripts/verify-feature-retirement-migration.ts",
     "db:seed": "tsx scripts/seed-db.ts",
     "seed:production-core": "tsx scripts/seed-production-core.ts",
     "seed:production-core:test": "tsx scripts/verify-production-core-seed.ts",
