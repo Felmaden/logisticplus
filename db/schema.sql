@@ -500,7 +500,7 @@ CREATE TABLE IF NOT EXISTS shipment_v2_profiles (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT shipment_v2_profiles_unique_shipment UNIQUE (organization_id, shipment_id),
-  CONSTRAINT shipment_v2_profiles_flow_code_check CHECK (flow_code IN ('IMPORT_LANJ', 'IMPORT_SHIP')),
+  CONSTRAINT shipment_v2_profiles_flow_code_check CHECK (flow_code IN ('IMPORT_LANJ', 'IMPORT_SHIP', 'IMPORT_RAIL')),
   CONSTRAINT shipment_v2_profiles_sections_object_check CHECK (jsonb_typeof(sections_json) = 'object')
 );
 

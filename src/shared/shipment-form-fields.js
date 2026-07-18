@@ -51,6 +51,13 @@ export const SHIPMENT_TYPES = [
     description: "واردات زمینی با تمرکز بر CMR، پلاک، راننده، مرز ورود و خروج.",
   },
   {
+    code: "IMPORT_RAIL_CARGO",
+    labelFa: "واردات ریلی (قطار)",
+    direction: "import",
+    transportMode: "rail",
+    description: "واردات ریلی با فرم پایه مشترک؛ اطلاعات تخصصی قطار در نسخه بعدی افزوده می‌شود.",
+  },
+  {
     code: "EXPORT_LENJ",
     labelFa: "صادرات با لنج",
     direction: "export",
@@ -486,6 +493,35 @@ export const DEFAULT_SHIPMENT_FORM_TEMPLATE_DEFINITIONS = [
         field("releaseStatus", { isImportant: true }),
         field("exitDate"),
       ]),
+    ],
+  }),
+  defaultTemplate({
+    code: "IMPORT_RAIL_CARGO",
+    titleFa: "قالب واردات ریلی",
+    description: "قالب پایه مشترک برای واردات ریلی؛ بدون فیلد تخصصی قطار.",
+    sections: [
+      section("base", "اطلاعات پایه", readonlyBaseFields.map((key) => field(key))),
+      section("goods", "کالا", [
+        field("goodsSummary", { isImportant: true }),
+        field("packageCount"),
+        field("grossWeightKg"),
+      ]),
+      section("declaration", "اظهار و ترخیص", [
+        field("cotageNumber", { isImportant: true }),
+        field("customsRoute", { isImportant: true }),
+        field("customsStatus", { isImportant: true }),
+        field("customsOffice"),
+      ]),
+      section("payments-release", "پرداخت ها و خروج", [
+        field("customsPaymentStatus", { isImportant: true }),
+        field("releaseStatus", { isImportant: true }),
+        field("exitDate"),
+      ]),
+      section("commercial-card", "کارت بازرگانی", [
+        field("commercialCardId", { isImportant: true }),
+        field("commercialCardDisplay"),
+      ]),
+      section("internal-note", "یادداشت داخلی", [field("internalNote")], { isCollapsedByDefault: true }),
     ],
   }),
   defaultTemplate({
