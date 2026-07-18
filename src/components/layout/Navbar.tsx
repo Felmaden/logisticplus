@@ -9,7 +9,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { LayoutDashboard, Ship, Users, CheckSquare, MessageSquare, ChevronRight, ChevronLeft, LogOut, Search, Bell, FileText, FileSearch, History, Settings as SettingsIcon, Menu, ShieldCheck, Archive, Calculator, X, Sun, Moon, IdCard, ClipboardList, GitBranch, Banknote } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { EXITED_SHIPMENTS_NAV_ENABLED, QUOTATIONS_UI_ENABLED, SHIPMENT_TEMPLATE_ADMIN_UI_ENABLED } from "@/src/config/features";
+import { EXITED_SHIPMENTS_NAV_ENABLED, QUOTATIONS_UI_ENABLED, RATES_UI_ENABLED, SHIPMENT_TEMPLATE_ADMIN_UI_ENABLED } from "@/src/config/features";
 import { useAppStore } from "../../store/useAppStore";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -44,7 +44,7 @@ const sidebarItems = [
   { icon: FileText, label: "اسناد", path: "/documents" },
   { icon: Archive, label: "آرشیو", path: "/archive" },
   { icon: History, label: "تغییرات", path: "/changelog" },
-  { icon: Banknote, label: "نرخ‌ها و تعرفه‌ها", path: "/rates" },
+  ...(RATES_UI_ENABLED ? [{ icon: Banknote, label: "نرخ‌ها و تعرفه‌ها", path: "/rates" }] : []),
   ...(SHIPMENT_TEMPLATE_ADMIN_UI_ENABLED
     ? [
       { icon: SettingsIcon, label: "فرم‌های نوع محموله", path: "/admin/shipment-form-templates", permission: "shipment_forms.manage" },

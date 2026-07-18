@@ -7,7 +7,7 @@ import React, { Suspense, lazy, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { ClientErrorBoundary } from "./components/ClientErrorBoundary";
 import { ProtectedShellSkeleton, PublicRouteSkeleton } from "./components/SkeletonStates";
-import { QUOTATIONS_UI_ENABLED, SHIPMENT_TEMPLATE_ADMIN_UI_ENABLED } from "./config/features";
+import { QUOTATIONS_UI_ENABLED, RATES_UI_ENABLED, SHIPMENT_TEMPLATE_ADMIN_UI_ENABLED } from "./config/features";
 import { installClientErrorReporting } from "./lib/errorReporting";
 import { installClientPerformanceMonitoring } from "./lib/clientPerformance";
 import { useAppStore } from "./store/useAppStore";
@@ -44,7 +44,7 @@ const ArchivePage = lazy(() => import("./app/Archive"));
 const QuotageManagement = QUOTATIONS_UI_ENABLED ? lazy(() => import("./app/QuotageManagement")) : null;
 const CustomerDetail = lazy(() => import("./app/CustomerDetail"));
 const SearchPage = lazy(() => import("./app/SearchPage"));
-const RatesAndTariffs = lazy(() => import("./app/RatesAndTariffs"));
+const RatesAndTariffs = RATES_UI_ENABLED ? lazy(() => import("./app/RatesAndTariffs")) : null;
 
 const protectedRoutePrefixes = [
   "/dashboard",
@@ -115,7 +115,16 @@ function AppRoutes() {
         <Route path="/compliance-meetings/*" element={<Navigate to="/dashboard" replace />} />
         <Route path="/cheques/*" element={<Navigate to="/dashboard" replace />} />
         <Route path="/commercial-cards" element={<ProtectedAppLayout><CommercialCards /></ProtectedAppLayout>} />
-        <Route path="/rates" element={<ProtectedAppLayout><RatesAndTariffs /></ProtectedAppLayout>} />
+        <Route
+          path="/rates/*"
+          element={
+            RATES_UI_ENABLED && RatesAndTariffs ? (
+              <ProtectedAppLayout><RatesAndTariffs /></ProtectedAppLayout>
+            ) : (
+              <Navigate to="/dashboard" replace />
+            )
+          }
+        />
         <Route path="/search" element={<ProtectedAppLayout><SearchPage /></ProtectedAppLayout>} />
         <Route path="/quotage" element={<Navigate to="/dashboard" replace />} />
         <Route

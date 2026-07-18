@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { disposeContexts, loginApi, loginViaUi, readOk, expectForbidden, uniqueEmail } from "./helpers";
 import { fetchBrsApiProCurrencyPayload, normalizeBrsApiProCurrencyPayload } from "@/server/src/modules/rates/brsapi.js";
+import { RATES_UI_ENABLED } from "@/src/config/features";
 
 test.describe.serial("rates and tariffs", () => {
   test("normalizes BRSAPI Pro currency payloads with free, SANA, and NIMA markets", () => {
@@ -187,6 +188,8 @@ test.describe.serial("rates and tariffs", () => {
   });
 
   test("renders the rates page on desktop and mobile without horizontal overflow", async ({ page }) => {
+    test.skip(!RATES_UI_ENABLED, "Rates UI is temporarily disabled.");
+
     const owner = await loginApi();
     const tenantEmail = uniqueEmail("rates-ui-tenant");
     await readOk<any>(
@@ -253,5 +256,17 @@ test.describe.serial("rates and tariffs", () => {
     await expect(page.getByTestId("rates-manual-button")).toHaveCount(0);
     await expect(page.getByTestId("rates-sync-button")).toHaveCount(0);
     await expect(page.getByTestId("rates-admin-diagnostics")).toHaveCount(0);
+  });
+
+  test("temporarily hides the rates UI while keeping old bookmarks safe", async ({ page }) => {
+    await loginViaUi(page);
+
+    await page.goto("/rates");
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.locator('nav a[href="/rates"]')).toHaveCount(0);
+
+    await page.goto("/rates/currency");
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByTestId("rates-page")).toHaveCount(0);
   });
 });
