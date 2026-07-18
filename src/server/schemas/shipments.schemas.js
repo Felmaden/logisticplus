@@ -6,6 +6,7 @@ import {
   TRANSPORT_MODE_VALUES,
 } from "../../shared/shipment-form-fields.js";
 import { SHIPMENT_STATUS_VALUES } from "../../shared/shipment-statuses.js";
+import { SHIPMENT_V2_FLOW_CODES } from "../../shared/shipment-v2-types.js";
 import { z } from "../validation.js";
 
 const blankToUndefined = (value) =>
@@ -137,7 +138,7 @@ const shipmentDirection = z.enum(SHIPMENT_DIRECTION_VALUES);
 const shipmentTransportMode = z.enum(TRANSPORT_MODE_VALUES);
 const shipmentTypeCode = z.enum(SHIPMENT_TYPE_CODES);
 const lenjType = z.enum(["TEH_LENJI", "MALVANI"]);
-const shipmentV2FlowCode = z.enum(["IMPORT_LANJ", "IMPORT_SHIP"]);
+const shipmentV2FlowCode = z.enum(SHIPMENT_V2_FLOW_CODES);
 const shipmentV2CodeMode = z.enum(["new", "existing"]);
 const shipmentV2SectionKey = z.enum(SHIPMENT_V2_SECTION_KEYS);
 const shipmentV2Text = (max = 180) => z.string().trim().max(max).optional();

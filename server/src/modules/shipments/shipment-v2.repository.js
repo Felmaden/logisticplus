@@ -9,6 +9,10 @@ import {
 } from "../../../../src/server/shipment-codes.js";
 import { assertBusinessEntityBelongsToTenant } from "../business-entities/business-entity.repository.js";
 import { normalizeShipmentStatus } from "../../../../src/shared/shipment-statuses.js";
+import {
+  shipmentV2FlowCodeForShipmentType,
+  shipmentV2FlowDefinition,
+} from "../../../../src/shared/shipment-v2-types.js";
 import { createShipmentCreatedNotifications } from "../notifications/notification.repository.js";
 import {
   applyKootajOperationUpdates,
@@ -26,11 +30,6 @@ export const SHIPMENT_V2_SECTION_KEYS = [
   "banking",
   "notes",
 ];
-
-const FLOW_TO_SHIPMENT_TYPE = {
-  IMPORT_LANJ: "IMPORT_LENJ",
-  IMPORT_SHIP: "IMPORT_SEA_CONTAINER",
-};
 
 function jsonObject(value, fallback = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
@@ -328,7 +327,7 @@ async function getCustomerRow(queryable, { organizationId, customerId }) {
 function deriveFlowCodeFromShipment(shipment) {
   const legacy = shipment?.legacy_data || {};
   if (legacy.importMethod === "LENJ" || shipment?.shipment_type_code === "IMPORT_LENJ") return "IMPORT_LANJ";
-  return "IMPORT_SHIP";
+  return shipmentV2FlowCodeForShipmentType(shipment?.shipment_type_code);
 }
 
 function setKnownError(error) {
@@ -382,15 +381,22 @@ export async function createShipmentV2Record(pool, {
         });
       }
       const shipmentCode = codeParts.shipmentCode;
-      const shipmentTypeCode = FLOW_TO_SHIPMENT_TYPE[body.flowCode] || "IMPORT_SEA_CONTAINER";
+      const flowDefinition = shipmentV2FlowDefinition(body.flowCode);
+      if (!flowDefinition) {
+        const error = new Error("Shipment flow is not supported.");
+        error.code = "UNSUPPORTED_SHIPMENT_FLOW";
+        error.statusCode = 400;
+        throw error;
+      }
+      const shipmentTypeCode = flowDefinition.shipmentTypeCode;
       const customerName = customer.contact_name || customer.company_name || "";
       const legacyData = {
         trackingNumber: shipmentCode,
         customerId: body.customerId,
         customerName,
         shipmentTypeCode,
-        shipmentDirection: "import",
-        transportMode: "sea",
+        shipmentDirection: flowDefinition.shipmentDirection,
+        transportMode: flowDefinition.transportMode,
       };
 
       const shipmentResult = await client.query(
@@ -400,7 +406,7 @@ export async function createShipmentV2Record(pool, {
            shipment_direction, transport_mode, shipment_type_code,
            origin, destination, legacy_data, created_by_id, updated_at
          )
-          VALUES ($1, $2, $3, $4, $5, $6, 'LOADING', $7, $8, $9, 'import', 'sea', $10, $11, $12, $13::jsonb, $14, NOW())
+          VALUES ($1, $2, $3, $4, $5, $6, 'LOADING', $7, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, NOW())
          RETURNING *`,
         [
           shipmentId,
@@ -412,6 +418,8 @@ export async function createShipmentV2Record(pool, {
           codeParts.shamsiYear,
           codeParts.shamsiDate,
           codeParts.shamsiSequence,
+          flowDefinition.shipmentDirection,
+          flowDefinition.transportMode,
           shipmentTypeCode,
           body.origin || null,
           body.deliveryPort || null,

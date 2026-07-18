@@ -94,7 +94,7 @@ const subtypeOptionsByCategory: Record<ShipmentV2CategoryCode, ShipmentV2Subtype
   COMMERCIAL: [
     { value: "COMMERCIAL_SHIP", label: "کشتی", availability: "active", flowCode: "IMPORT_SHIP" },
     { value: "COMMERCIAL_TRUCK", label: "ماشینی (تراک)", availability: "coming_soon" },
-    { value: "COMMERCIAL_RAIL", label: "قطار (ریلی)", availability: "coming_soon", flowCode: "IMPORT_RAIL" },
+    { value: "COMMERCIAL_RAIL", label: "قطار (ریلی)", availability: "active", flowCode: "IMPORT_RAIL" },
     { value: "COMMERCIAL_AIR", label: "هوایی", availability: "coming_soon" },
   ],
 };

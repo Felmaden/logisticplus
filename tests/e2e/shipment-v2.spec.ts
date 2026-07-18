@@ -115,7 +115,8 @@ test.describe.serial("shipment module v2", () => {
 
     await page.goto("/shipments/new-v2");
     await expect(page.getByTestId("shipment-v2-create-page")).toBeVisible();
-    await page.getByTestId("shipment-v2-flow-IMPORT_LANJ").click();
+    await page.getByTestId("shipment-v2-category-MALVANI").click();
+    await page.getByTestId("shipment-v2-subtype").selectOption("MALVANI_STANDARD");
     await page.getByTestId("shipment-v2-customer").fill(customerIdentifier);
     await expect(page.getByTestId("shipment-v2-customer-suggestions")).toBeVisible();
     await page.getByTestId("shipment-v2-customer-suggestion-0").click();
@@ -124,7 +125,6 @@ test.describe.serial("shipment module v2", () => {
     await page.getByTestId("shipment-v2-origin").fill("Dubai");
     await page.getByTestId("shipment-v2-discharge-port").fill("Bandar Abbas");
     await page.getByTestId("shipment-v2-delivery-port").fill("Tehran");
-    await page.getByTestId("shipment-v2-lenj-type").selectOption("MALVANI");
     await expect(page.getByTestId("shipment-v2-create-goods-section")).toBeVisible();
     await page.getByTestId("shipment-v2-create-goods-row-0-description").fill("Initial goods from create");
     await page.getByTestId("shipment-v2-create-goods-row-0-packaging").fill("Carton");
@@ -434,6 +434,97 @@ test.describe.serial("shipment module v2", () => {
     } finally {
       await disposeContexts(...contexts);
     }
+  });
+
+  test("requires the shipment hierarchy, keeps future types disabled, and creates commercial rail", async ({ page }) => {
+    await loginViaUi(page);
+    const marker = `ShipmentV2Rail${Date.now()}`;
+    const customer = await createCustomer(page.request, marker);
+    const customerIdentifier = customer.customerCode || customer.code || customer.id;
+
+    await page.goto("/shipments/new-v2");
+    await expect(page.getByTestId("shipment-v2-submit")).toHaveCount(0);
+    await expect(page.getByTestId("shipment-v2-category-MALVANI")).toBeVisible();
+    await expect(page.getByTestId("shipment-v2-category-COMMERCIAL")).toBeVisible();
+
+    await page.getByTestId("shipment-v2-category-MALVANI").click();
+    const malvaniSubtype = page.getByTestId("shipment-v2-subtype");
+    await expect(malvaniSubtype.locator("option")).toHaveCount(6);
+    await expect(malvaniSubtype.locator('option[value="MALVANI_KOLEBARI"]')).toBeDisabled();
+    await expect(malvaniSubtype.locator('option[value="MALVANI_PILEVARI"]')).toBeDisabled();
+    await expect(malvaniSubtype.locator('option[value="MALVANI_AIR"]')).toBeDisabled();
+    await malvaniSubtype.selectOption("MALVANI_STANDARD");
+    await expect(page.getByTestId("shipment-v2-submit")).toBeVisible();
+
+    await page.getByTestId("shipment-v2-category-COMMERCIAL").click();
+    const commercialSubtype = page.getByTestId("shipment-v2-subtype");
+    await expect(commercialSubtype).toHaveValue("");
+    await expect(commercialSubtype.locator("option")).toHaveCount(5);
+    await expect(commercialSubtype.locator('option[value="COMMERCIAL_TRUCK"]')).toBeDisabled();
+    await expect(commercialSubtype.locator('option[value="COMMERCIAL_AIR"]')).toBeDisabled();
+    await commercialSubtype.selectOption("COMMERCIAL_RAIL");
+
+    await expect(page.getByTestId("shipment-v2-submit")).toBeVisible();
+    await expect(page.getByTestId("shipment-v2-create-container20")).toHaveCount(0);
+    await expect(page.getByLabel("مقصد / محل تحویل")).toBeVisible();
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.getByTestId("shipment-v2-customer").fill(customerIdentifier);
+    await page.getByTestId("shipment-v2-customer-suggestion-0").click();
+    await page.getByTestId("shipment-v2-origin").fill("Sarakhs");
+    await page.getByTestId("shipment-v2-discharge-port").fill("Rail terminal");
+    await page.getByTestId("shipment-v2-delivery-port").fill("Tehran");
+    await page.getByTestId("shipment-v2-consignee").fill("Rail consignee");
+    await page.getByTestId("shipment-v2-create-goods-row-0-description").fill("Rail cargo");
+    await page.getByTestId("shipment-v2-submit").click();
+
+    await page.waitForURL(/\/shipments\/(?!new-v2$)[^/]+$/);
+    const shipmentId = new URL(page.url()).pathname.split("/")[2];
+    await expect(page.getByTestId("shipment-v2-detail-page")).toBeVisible();
+    await expect(page.getByText("تجاری / قطار (ریلی)", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("shipment-v2-base-consignee")).toContainText("Rail consignee");
+    await expect(page.getByTestId("shipment-v2-base-total-container-count")).toHaveCount(0);
+
+    const profile = await readOk<any>(await page.request.get(`/api/shipments/${encodeURIComponent(shipmentId)}/v2-profile`));
+    expect(profile.profile.flowCode).toBe("IMPORT_RAIL");
+    expect(profile.shipment).toMatchObject({
+      shipmentTypeCode: "IMPORT_RAIL_CARGO",
+      shipmentDirection: "import",
+      transportMode: "rail",
+    });
+    expect(profile.profile.sections.goods.container20Count).toBeNull();
+    expect(profile.profile.sections.goods.container40Count).toBeNull();
+
+    const formTemplate = await readOk<any>(
+      await page.request.get(`/api/shipments/${encodeURIComponent(shipmentId)}/form-template`)
+    );
+    expect(formTemplate.shipment.shipmentTypeCode).toBe("IMPORT_RAIL_CARGO");
+    expect(formTemplate.template).toMatchObject({
+      code: "default-import-rail-cargo",
+      shipmentTypeCode: "IMPORT_RAIL_CARGO",
+      isSystem: true,
+    });
+
+    const workflowTemplate = await readOk<any>(
+      await page.request.get(`/api/shipments/${encodeURIComponent(shipmentId)}/workflow-template`)
+    );
+    expect(workflowTemplate.shipment).toMatchObject({
+      shipmentTypeCode: "IMPORT_RAIL_CARGO",
+      shipmentDirection: "import",
+      transportMode: "rail",
+    });
+    expect(workflowTemplate.template).toBeTruthy();
+
+    const unsupported = await page.request.post("/api/shipments/v2", {
+      data: {
+        flowCode: "IMPORT_AIR_CARGO",
+        customerId: customer.id,
+        origin: "Dubai",
+        dischargePort: "Tehran",
+        deliveryPort: "Tehran",
+      },
+    });
+    expect(unsupported.status()).toBe(400);
   });
 
   test("adds and edits an empty Import Ship consignee after creation", async ({ page }) => {
