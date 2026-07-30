@@ -40,8 +40,12 @@ export function isCommercialShipmentV2Flow(flowCode) {
   return ["IMPORT_SHIP", "IMPORT_RAIL"].includes(String(flowCode || "").trim().toUpperCase());
 }
 
-export function showsShipmentV2ContainerCounts(flowCode) {
+export function isImportShipShipmentV2Flow(flowCode) {
   return String(flowCode || "").trim().toUpperCase() === "IMPORT_SHIP";
+}
+
+export function showsShipmentV2ContainerCounts(flowCode) {
+  return isImportShipShipmentV2Flow(flowCode);
 }
 
 export function shipmentV2ClassificationLabel(flowCode, lenjType) {

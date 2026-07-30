@@ -127,6 +127,7 @@ export const SHIPMENT_V2_SECTION_KEYS = [
   "orderRegistration",
   "goods",
   "declarationKootaj",
+  "shipping",
   "permits",
   "payments",
   "banking",
@@ -149,6 +150,7 @@ const requiredShipmentV2Text = (fieldName, max = 180) =>
 const shipmentV2CustomsRoute = z.enum(["GREEN", "YELLOW", "RED", "DIRECT_CARRIAGE"]);
 const shipmentV2CurrencyCode = z.enum(["EUR", "CNY", "USD", "AED", "IRR"]);
 const shipmentV2CustomsTaxStatus = z.enum(["PAYABLE", "GOOD_STANDING"]);
+const shipmentV2ShippingProviderType = z.enum(["SHIPPING_LINE", "FORWARDER"]);
 const shipmentV2Date = z.preprocess(
   normalizeShipmentV2DateInput,
   z.string().trim().refine(isRealShipmentV2Date, "Date must be a valid Shamsi YYYY/MM/DD or ISO YYYY-MM-DD date.").nullable().optional()
@@ -207,6 +209,32 @@ const shipmentV2DeclarationKootajSectionPayloadSchema = z.object({
   finalPaidCurrency: shipmentV2CurrencyCode.optional(),
 }).strict();
 
+const shipmentV2ShippingContainerRowSchema = z.object({
+  containerNumber: requiredShipmentV2Text("Container number", 120),
+  dischargeDate: shipmentV2Date,
+  deliveryOrderDate: shipmentV2Date,
+  arrivalNoticeDate: shipmentV2Date,
+}).strict();
+
+const shipmentV2ShippingSectionPayloadSchema = z.object({
+  providerType: shipmentV2ShippingProviderType.optional().nullable(),
+  providerName: shipmentV2Text(180),
+  containerRows: z.array(shipmentV2ShippingContainerRowSchema).max(100).optional(),
+}).strict().superRefine((value, ctx) => {
+  const seenContainerNumbers = new Set();
+  for (const [index, row] of (value.containerRows || []).entries()) {
+    const normalizedContainerNumber = row.containerNumber.trim().replace(/\s+/g, " ").toUpperCase();
+    if (seenContainerNumbers.has(normalizedContainerNumber)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Container numbers must be unique.",
+        path: ["containerRows", index, "containerNumber"],
+      });
+    }
+    seenContainerNumbers.add(normalizedContainerNumber);
+  }
+});
+
 const shipmentV2PermitsSectionPayloadSchema = z.object({
   permitRows: z.array(shipmentV2PermitRowSchema).max(100).optional(),
 }).strict();
@@ -251,6 +279,7 @@ export const shipmentV2SectionPayloadSchemas = {
   orderRegistration: shipmentV2EmptySectionPayloadSchema,
   goods: shipmentV2GoodsSectionPayloadSchema,
   declarationKootaj: shipmentV2DeclarationKootajSectionPayloadSchema,
+  shipping: shipmentV2ShippingSectionPayloadSchema,
   permits: shipmentV2PermitsSectionPayloadSchema,
   payments: shipmentV2PaymentsSectionPayloadSchema,
   banking: shipmentV2BankingSectionPayloadSchema,

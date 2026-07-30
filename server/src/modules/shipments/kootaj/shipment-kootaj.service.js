@@ -30,6 +30,7 @@ export function defaultV2SectionsForShipment(shipment = {}) {
     orderRegistration: {},
     goods: { goodsRows: [] },
     declarationKootaj: {},
+    shipping: { providerType: null, providerName: "", containerRows: [] },
     permits: { permitRows: [] },
     payments: {},
     banking: {},

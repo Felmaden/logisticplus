@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LogisticPlus">
+  <rect width="512" height="512" rx="112" fill="#2563eb"/>
+  <path fill="#fff" d="M104 156h304v192H104z"/>
+  <path fill="#dbeafe" d="M160 108h192v76H160z"/>
+  <path fill="#1d4ed8" d="M144 190h224v44H144z"/>
+  <circle cx="174" cy="372" r="44" fill="#fff"/>
+  <circle cx="338" cy="372" r="44" fill="#fff"/>
+  <circle cx="174" cy="372" r="18" fill="#2563eb"/>
+  <circle cx="338" cy="372" r="18" fill="#2563eb"/>
+</svg>

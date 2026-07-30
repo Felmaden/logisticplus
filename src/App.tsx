@@ -11,6 +11,7 @@ import { QUOTATIONS_UI_ENABLED, RATES_UI_ENABLED, SHIPMENT_TEMPLATE_ADMIN_UI_ENA
 import { installClientErrorReporting } from "./lib/errorReporting";
 import { installClientPerformanceMonitoring } from "./lib/clientPerformance";
 import { useAppStore } from "./store/useAppStore";
+import { PushNotificationBootstrap } from "./components/notifications/PushNotificationBootstrap";
 
 const LazyToaster = lazy(() =>
   import("sonner").then(({ Toaster }) => ({
@@ -18,6 +19,7 @@ const LazyToaster = lazy(() =>
   }))
 );
 const ProtectedAppLayout = lazy(() => import("./components/layout/ProtectedAppLayout"));
+const LandingPage = lazy(() => import("./app/LandingPage"));
 const LoginPage = lazy(() => import("./app/LoginPage"));
 const Dashboard = lazy(() => import("./app/Dashboard"));
 const Shipments = lazy(() => import("./app/Shipments"));
@@ -88,7 +90,7 @@ function AppRoutes() {
   return (
     <Suspense fallback={routeFallback}>
       <Routes>
-        <Route path="/" element={<PublicLoginEntry />} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<PublicLoginEntry />} />
         <Route path="/contact" element={<Navigate to="/login" replace />} />
         <Route path="/signup" element={<Navigate to="/login" replace />} />
@@ -179,6 +181,7 @@ export default function App() {
 
   return (
     <Router>
+      <PushNotificationBootstrap />
       <Suspense fallback={null}>
         <LazyToaster />
       </Suspense>

@@ -11,12 +11,14 @@ import { ActionSkeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAppStore } from "@/src/store/useAppStore";
+import { PushNotificationControls } from "@/src/components/notifications/PushNotificationControls";
 
-type NotificationKey = "shipmentUpdates" | "taskDeadlines" | "chatMessages";
+type NotificationKey = "shipmentUpdates" | "taskDeadlines" | "commercialCardExpiry" | "chatMessages";
 
 const defaultNotificationPreferences: Record<NotificationKey, boolean> = {
   shipmentUpdates: true,
   taskDeadlines: true,
+  commercialCardExpiry: true,
   chatMessages: true,
 };
 
@@ -68,6 +70,10 @@ export default function Profile() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [savingSecurity, setSavingSecurity] = useState(false);
   const [savingNotifications, setSavingNotifications] = useState(false);
+  const [activeTab, setActiveTab] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    return requested === "security" || requested === "notifications" ? requested : "profile";
+  });
 
   const handleAvatarChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -185,6 +191,7 @@ export default function Profile() {
   const notificationItems: Array<{ key: NotificationKey; title: string; description: string }> = [
     { key: "shipmentUpdates", title: "تغییر وضعیت محموله‌ها", description: "اعلان هنگام تغییر مرحله یا وضعیت بار" },
     { key: "taskDeadlines", title: "مهلت وظایف", description: "یادآوری برای کارهایی که به موعد نزدیک می‌شوند" },
+    { key: "commercialCardExpiry", title: "انقضای کارت بازرگانی", description: "یادآوری در دو ماه، یک ماه و یک هفته مانده به انقضا" },
     { key: "chatMessages", title: "پیام‌های چت", description: "اعلان پیام‌های داخلی و گروهی" },
   ];
 
@@ -229,7 +236,7 @@ export default function Profile() {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="profile" className="gap-4" style={{ flexDirection: "column" }}>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-4" style={{ flexDirection: "column" }}>
         <TabsList className="w-fit flex-none gap-1.5 rounded-xl bg-muted p-1.5" style={{ height: 48 }}>
           <TabsTrigger value="profile" className="min-w-28 flex-none gap-2 rounded-lg px-4 py-2 font-bold" style={{ height: 36 }}>
             <User className="h-4 w-4" />
@@ -336,6 +343,8 @@ export default function Profile() {
         </TabsContent>
 
         <TabsContent value="notifications">
+          <div className="space-y-4">
+          <PushNotificationControls />
           <Card className="rounded-xl border-border bg-card">
             <CardHeader>
               <CardTitle>تنظیمات اعلان‌ها</CardTitle>
@@ -363,6 +372,7 @@ export default function Profile() {
               </div>
             </CardContent>
           </Card>
+          </div>
         </TabsContent>
       </Tabs>
     </div>

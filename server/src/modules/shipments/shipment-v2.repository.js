@@ -25,6 +25,7 @@ export const SHIPMENT_V2_SECTION_KEYS = [
   "orderRegistration",
   "goods",
   "declarationKootaj",
+  "shipping",
   "permits",
   "payments",
   "banking",
@@ -52,6 +53,7 @@ function defaultSections(overrides = {}) {
     orderRegistration: {},
     goods: { goodsRows: [] },
     declarationKootaj: {},
+    shipping: { providerType: null, providerName: "", containerRows: [] },
     permits: { permitRows: [] },
     payments: {},
     banking: {},
@@ -147,6 +149,21 @@ function normalizeSectionPayload(sectionKey, payload = {}) {
       totalValueCurrency: cleaned.totalValueCurrency || "IRR",
       finalPaidAmount: cleaned.finalPaidAmount ?? null,
       finalPaidCurrency: cleaned.finalPaidCurrency || "IRR",
+    };
+  }
+  if (sectionKey === "shipping") {
+    const providerType = cleaned.providerType || null;
+    return {
+      providerType,
+      providerName: providerType ? String(cleaned.providerName || "").trim() : "",
+      containerRows: Array.isArray(cleaned.containerRows)
+        ? cleaned.containerRows.map((row) => ({
+          containerNumber: String(row?.containerNumber || "").trim().replace(/\s+/g, " ").toUpperCase(),
+          dischargeDate: row?.dischargeDate || "",
+          deliveryOrderDate: row?.deliveryOrderDate || "",
+          arrivalNoticeDate: row?.arrivalNoticeDate || "",
+        }))
+        : [],
     };
   }
   if (sectionKey === "permits") {
@@ -556,6 +573,12 @@ export async function updateShipmentV2Section(pool, {
       const error = new Error("Shipment V2 profile has not been initialized.");
       error.code = "SHIPMENT_V2_PROFILE_NOT_FOUND";
       error.statusCode = 404;
+      throw error;
+    }
+    if (sectionKey === "shipping" && profile.flow_code !== "IMPORT_SHIP") {
+      const error = new Error("Shipping section is available only for Import Ship profiles.");
+      error.code = "SHIPMENT_V2_SECTION_NOT_AVAILABLE";
+      error.statusCode = 400;
       throw error;
     }
 

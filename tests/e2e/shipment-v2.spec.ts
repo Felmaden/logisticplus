@@ -62,6 +62,11 @@ function fieldDisplayValue(text: string) {
     .pop() || "";
 }
 
+async function chooseShamsiDate(page: any, fieldTestId: string) {
+  await page.getByTestId(fieldTestId).getByTestId("shamsi-date-time-trigger").click();
+  await page.getByTestId("shamsi-date-day").first().click();
+}
+
 test.describe.serial("shipment module v2", () => {
   test("creates a clean Import Lanj shipment through V2 UI and edits notes", async ({ page }) => {
     await loginViaUi(page);
@@ -174,6 +179,12 @@ test.describe.serial("shipment module v2", () => {
       "shipment-v2-section-banking",
     ]);
     await expect(page.getByTestId("shipment-v2-section-orderRegistration")).toHaveCount(0);
+    await expect(page.getByTestId("shipment-v2-section-shipping")).toHaveCount(0);
+    const unavailableLanjShipping = await page.request.patch(
+      `/api/shipments/${encodeURIComponent(shipmentId)}/v2-profile/sections/shipping`,
+      { data: { providerType: "FORWARDER", providerName: "Unavailable for Lanj", containerRows: [] } }
+    );
+    expect(unavailableLanjShipping.status()).toBe(400);
 
     await expect(page.getByTestId("shipment-import-details-panel")).toHaveCount(0);
     await expect(page.getByTestId("shipment-v2-section-goods")).toContainText("Initial goods from create");
@@ -410,6 +421,84 @@ test.describe.serial("shipment module v2", () => {
         }),
       ]);
       expect(created.profile.sections.declarationKootaj).toEqual({});
+      expect(created.profile.sections.shipping).toEqual({
+        providerType: null,
+        providerName: "",
+        containerRows: [],
+      });
+
+      const shippingUpdated = await readOk<any>(
+        await owner.patch(`/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/shipping`, {
+          data: {
+            providerType: "SHIPPING_LINE",
+            providerName: "API Shipping Line",
+            containerRows: [
+              {
+                containerNumber: " mscu 1234567 ",
+                dischargeDate: "1405/05/10",
+                deliveryOrderDate: "1405/05/11",
+                arrivalNoticeDate: "2026-08-03",
+              },
+            ],
+          },
+        })
+      );
+      expect(shippingUpdated.profile.sections.shipping).toEqual({
+        providerType: "SHIPPING_LINE",
+        providerName: "API Shipping Line",
+        containerRows: [
+          {
+            containerNumber: "MSCU 1234567",
+            dischargeDate: "1405/05/10",
+            deliveryOrderDate: "1405/05/11",
+            arrivalNoticeDate: "2026-08-03",
+          },
+        ],
+      });
+
+      const duplicateContainers = await owner.patch(
+        `/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/shipping`,
+        {
+          data: {
+            containerRows: [
+              { containerNumber: "MSCU 1234567" },
+              { containerNumber: "mscu 1234567" },
+            ],
+          },
+        }
+      );
+      expect(duplicateContainers.status()).toBe(400);
+
+      const invalidShippingDate = await owner.patch(
+        `/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/shipping`,
+        {
+          data: {
+            containerRows: [{ containerNumber: "TCLU1234567", dischargeDate: "1405/13/01" }],
+          },
+        }
+      );
+      expect(invalidShippingDate.status()).toBe(400);
+
+      const dateWithoutContainer = await owner.patch(
+        `/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/shipping`,
+        {
+          data: {
+            containerRows: [{ containerNumber: "", dischargeDate: "1405/05/12" }],
+          },
+        }
+      );
+      expect(dateWithoutContainer.status()).toBe(400);
+
+      const clearedShipping = await readOk<any>(
+        await owner.patch(`/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/shipping`, {
+          data: {},
+        })
+      );
+      expect(clearedShipping.profile.sections.shipping).toEqual({
+        providerType: null,
+        providerName: "",
+        containerRows: [],
+      });
 
       const updated = await readOk<any>(
         await owner.patch(`/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/base`, {
@@ -427,8 +516,8 @@ test.describe.serial("shipment module v2", () => {
       contexts.push(tenant);
       await expectUnavailable(await tenant.get(`/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile`));
       await expectUnavailable(
-        await tenant.patch(`/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/notes`, {
-          data: { internalNote: "cross tenant note" },
+        await tenant.patch(`/api/shipments/${encodeURIComponent(created.shipment.id)}/v2-profile/sections/shipping`, {
+          data: { providerType: "FORWARDER", providerName: "cross tenant forwarder", containerRows: [] },
         })
       );
     } finally {
@@ -484,6 +573,13 @@ test.describe.serial("shipment module v2", () => {
     await expect(page.getByText("تجاری / قطار (ریلی)", { exact: true })).toBeVisible();
     await expect(page.getByTestId("shipment-v2-base-consignee")).toContainText("Rail consignee");
     await expect(page.getByTestId("shipment-v2-base-total-container-count")).toHaveCount(0);
+    await expect(page.getByTestId("shipment-v2-section-shipping")).toHaveCount(0);
+
+    const unavailableRailShipping = await page.request.patch(
+      `/api/shipments/${encodeURIComponent(shipmentId)}/v2-profile/sections/shipping`,
+      { data: { providerType: "SHIPPING_LINE", providerName: "Unavailable for rail", containerRows: [] } }
+    );
+    expect(unavailableRailShipping.status()).toBe(400);
 
     const profile = await readOk<any>(await page.request.get(`/api/shipments/${encodeURIComponent(shipmentId)}/v2-profile`));
     expect(profile.profile.flowCode).toBe("IMPORT_RAIL");
@@ -557,5 +653,78 @@ test.describe.serial("shipment module v2", () => {
     await page.getByTestId("shipment-v2-base-consignee-input").fill("Consignee edited from details");
     await page.getByTestId("shipment-v2-base-save").click();
     await expect(page.getByTestId("shipment-v2-base-consignee")).toContainText("Consignee edited from details");
+
+    const sectionOrder = await page.locator('[data-testid^="shipment-v2-section-"]').evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid"))
+    );
+    expect(sectionOrder).toEqual([
+      "shipment-v2-section-notes",
+      "shipment-v2-section-base",
+      "shipment-v2-section-goods",
+      "shipment-v2-section-declarationKootaj",
+      "shipment-v2-section-shipping",
+      "shipment-v2-section-permits",
+      "shipment-v2-section-payments",
+      "shipment-v2-section-banking",
+    ]);
+
+    await page.getByTestId("shipment-v2-shipping-edit").click();
+    await page.getByTestId("shipment-v2-shipping-provider-type").selectOption("SHIPPING_LINE");
+    await page.getByLabel("نام لاین کشتیرانی").fill("Temporary line");
+    await page.getByTestId("shipment-v2-shipping-cancel").click();
+    await expect(page.getByTestId("shipment-v2-shipping-provider-type-value")).toContainText("ثبت نشده");
+    await expect(page.getByTestId("shipment-v2-shipping-provider-name-value")).toContainText("ثبت نشده");
+
+    await page.getByTestId("shipment-v2-shipping-edit").click();
+    await page.getByTestId("shipment-v2-shipping-provider-type").selectOption("FORWARDER");
+    await page.getByLabel("نام فورواردر").fill("Forwarder UI Test");
+    await chooseShamsiDate(page, "shipment-v2-shipping-row-0-discharge-date");
+    await page.getByTestId("shipment-v2-shipping-save").click();
+    await expect(page.getByRole("alert")).toContainText("شماره کانتینر");
+
+    await page.getByTestId("shipment-v2-shipping-row-0-number").fill("mscu 7654321");
+    await chooseShamsiDate(page, "shipment-v2-shipping-row-0-delivery-order-date");
+    await chooseShamsiDate(page, "shipment-v2-shipping-row-0-arrival-notice-date");
+    await page.getByTestId("shipment-v2-shipping-add").click();
+    await page.getByTestId("shipment-v2-shipping-row-1-number").fill("MSCU 7654321");
+    await page.getByTestId("shipment-v2-shipping-save").click();
+    await expect(page.getByRole("alert").filter({ hasText: "تکراری" })).toHaveCount(2);
+
+    await page.getByTestId("shipment-v2-shipping-row-1-number").fill("tclu 2468135");
+    await chooseShamsiDate(page, "shipment-v2-shipping-row-1-discharge-date");
+    await chooseShamsiDate(page, "shipment-v2-shipping-row-1-delivery-order-date");
+    await chooseShamsiDate(page, "shipment-v2-shipping-row-1-arrival-notice-date");
+    await page.getByTestId("shipment-v2-shipping-add").click();
+    await expect(page.getByTestId("shipment-v2-shipping-row-2")).toBeVisible();
+    await page.getByRole("button", { name: "حذف کانتینر 3" }).click();
+    await expect(page.getByTestId("shipment-v2-shipping-row-2")).toHaveCount(0);
+    await page.getByTestId("shipment-v2-shipping-save").click();
+
+    const shippingSection = page.getByTestId("shipment-v2-section-shipping");
+    await expect(shippingSection).toContainText("فورواردر");
+    await expect(shippingSection).toContainText("Forwarder UI Test");
+    await expect(shippingSection).toContainText("MSCU 7654321");
+    await expect(shippingSection).toContainText("TCLU 2468135");
+    await expect(shippingSection).toContainText("تاریخ تخلیه");
+    await expect(shippingSection).toContainText("تاریخ ترخیصیه");
+    await expect(shippingSection).toContainText("تاریخ اعلامیه ورود");
+    await expectNoHorizontalPageOverflow(page);
+
+    await page.reload();
+    await expect(page.getByTestId("shipment-v2-section-shipping")).toContainText("Forwarder UI Test");
+    await expect(page.getByTestId("shipment-v2-section-shipping")).toContainText("MSCU 7654321");
+    await expect(page.getByTestId("shipment-v2-section-shipping")).toContainText("TCLU 2468135");
+
+    const profile = await readOk<any>(
+      await page.request.get(`/api/shipments/${encodeURIComponent(shipmentId)}/v2-profile`)
+    );
+    expect(profile.profile.sections.shipping).toMatchObject({
+      providerType: "FORWARDER",
+      providerName: "Forwarder UI Test",
+      containerRows: [
+        expect.objectContaining({ containerNumber: "MSCU 7654321" }),
+        expect.objectContaining({ containerNumber: "TCLU 2468135" }),
+      ],
+    });
   });
 });

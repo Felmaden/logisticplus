@@ -47,7 +47,7 @@ Document upload/download routes:
 
 Billing and admin signup routes:
 
-- Public self-serve signup and contact request routes are removed from the public-release app and return 404 through explicit disabled-route guards.
+- Public self-serve signup remains removed and returns 404. Public demo requests use the narrowly scoped `/api/contact-requests` intake and are reviewable only by platform admins; they do not create users, organizations, subscriptions, or tenant records.
 - The only supported company creation path is `POST /api/admin/organizations/manual-signup` for platform admins.
 - Current billing routes cover `/api/billing/my-subscription`, `/api/billing/my-invoices`, `/api/billing/my-payments`, and platform-admin invoice/payment management.
 

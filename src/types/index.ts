@@ -113,6 +113,7 @@ export type ShipmentV2SectionKey =
   | "orderRegistration"
   | "goods"
   | "declarationKootaj"
+  | "shipping"
   | "permits"
   | "payments"
   | "banking"
@@ -122,6 +123,7 @@ export type ShipmentV2LenjType = "TEH_LENJI" | "MALVANI";
 export type ShipmentV2CustomsRoute = "GREEN" | "YELLOW" | "RED" | "DIRECT_CARRIAGE";
 export type ShipmentV2CurrencyCode = "EUR" | "CNY" | "USD" | "AED" | "IRR";
 export type ShipmentV2CustomsTaxStatus = "PAYABLE" | "GOOD_STANDING";
+export type ShipmentV2ShippingProviderType = "SHIPPING_LINE" | "FORWARDER";
 
 export interface ShipmentV2ShipmentSummary {
   id: string;
@@ -184,6 +186,19 @@ export interface ShipmentV2DeclarationKootajSection {
   finalPaidCurrency?: ShipmentV2CurrencyCode;
 }
 
+export interface ShipmentV2ShippingContainerRow {
+  containerNumber: string;
+  dischargeDate?: string;
+  deliveryOrderDate?: string;
+  arrivalNoticeDate?: string;
+}
+
+export interface ShipmentV2ShippingSection {
+  providerType?: ShipmentV2ShippingProviderType | null;
+  providerName?: string;
+  containerRows?: ShipmentV2ShippingContainerRow[];
+}
+
 export interface ShipmentV2PermitRow {
   permitName: string;
   permitState?: string;
@@ -225,6 +240,7 @@ export interface ShipmentV2Sections {
   orderRegistration: ShipmentV2EmptySection;
   goods: ShipmentV2GoodsSection;
   declarationKootaj: ShipmentV2DeclarationKootajSection;
+  shipping: ShipmentV2ShippingSection;
   permits: ShipmentV2PermitsSection;
   payments: ShipmentV2PaymentsSection;
   banking: ShipmentV2BankingSection;
@@ -539,8 +555,21 @@ export interface CommercialCard {
   id: string;
   holderName: string;
   cardNumber: string;
-  issueDate: string;
+  issueDate?: string;
   expirationDate: string;
+  invoiceNumber?: string;
+  orderRegistrationNumber?: string;
+  totalValueAmount?: number | null;
+  totalValueCurrency?: ShipmentV2CurrencyCode;
+  bankName?: string;
+  bankBranch?: string;
+  allocationDate?: string;
+  commitmentSettlementDeadline?: string;
+  remainingCommitmentAmount?: number | null;
+  remainingCommitmentCurrency?: ShipmentV2CurrencyCode;
+  goodsDescription?: string;
+  tariffCode?: string;
+  orderRegistrationExpiryDate?: string;
   nationalId?: string;
   responsibleName?: string;
   responsiblePhone?: string;

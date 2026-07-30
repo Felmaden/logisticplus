@@ -49,6 +49,7 @@ import {
   shipmentStatusLabel,
 } from "@/src/shared/shipment-statuses.js";
 import {
+  isImportShipShipmentV2Flow,
   isLanjShipmentV2Flow,
   shipmentV2ClassificationLabel,
   shipmentV2FlowCodeForShipmentType,
@@ -79,6 +80,9 @@ import type {
   ShipmentV2ProfileResponse,
   ShipmentV2SectionKey,
   ShipmentV2SectionPayload,
+  ShipmentV2ShippingContainerRow,
+  ShipmentV2ShippingProviderType,
+  ShipmentV2ShippingSection,
   ShipmentV2ShipmentSummary,
   User,
   UserRole,
@@ -102,6 +106,7 @@ const sectionDefinitions: Array<{
   { key: "base", title: "اطلاعات پایه", icon: Package },
   { key: "goods", title: "مشخصات کالا", icon: Ship },
   { key: "declarationKootaj", title: "اظهار و کوتاژ", icon: FileText },
+  { key: "shipping", title: "کشتیرانی", icon: Anchor },
   { key: "permits", title: "مجوز ها", icon: ShieldCheck },
   { key: "payments", title: "پرداخت ها", icon: CreditCard },
   { key: "banking", title: "اطلاعات بانکی", icon: Landmark },
@@ -126,6 +131,11 @@ const currencyLabels: Record<ShipmentV2CurrencyCode, string> = {
 const customsTaxStatusLabels: Record<ShipmentV2CustomsTaxStatus, string> = {
   PAYABLE: "نیاز به پرداخت",
   GOOD_STANDING: "خوش حسابی",
+};
+
+const shippingProviderLabels: Record<ShipmentV2ShippingProviderType, string> = {
+  SHIPPING_LINE: "لاین کشتیرانی",
+  FORWARDER: "فورواردر",
 };
 
 const currencyOptions: ShipmentV2CurrencyCode[] = ["EUR", "CNY", "USD", "AED", "IRR"];
@@ -215,6 +225,10 @@ type GoodsDraftRow = Omit<ShipmentV2GoodsRow, "quantity" | "weight" | "cbm" | "p
 type DeclarationDraft = Omit<ShipmentV2DeclarationKootajSection, "totalValueAmount" | "finalPaidAmount"> & {
   totalValueAmount: string;
   finalPaidAmount: string;
+};
+
+type ShippingContainerDraftRow = ShipmentV2ShippingContainerRow & {
+  id: string;
 };
 
 type PaymentsDraft = Omit<ShipmentV2PaymentsSection, "customsAmount" | "customsDifferenceAmount" | "customsTaxAmount"> & {
@@ -930,7 +944,6 @@ function BaseSection({
               </DialogHeader>
               <div className="grid gap-1.5">
                 <DialogFactRow label="شماره کارت" value={linkedCommercialCard.cardNumber} />
-                <DialogFactRow label="تاریخ صدور" value={displayShamsiDate(linkedCommercialCard.issueDate)} />
                 <DialogFactRow label="تاریخ انقضا" value={displayShamsiDate(linkedCommercialCard.expirationDate)} />
                 <DialogFactRow label="شناسه ملی" value={linkedCommercialCard.nationalId || "ثبت نشده"} />
                 <DialogFactRow label="اسناد" value={toPersianDigits(linkedCommercialCard.documents?.length || 0)} />
@@ -1417,6 +1430,332 @@ function DeclarationKootajSection({
           });
           setIsEditing(false);
         }}
+      />
+    </div>
+  );
+}
+
+function ShippingSection({
+  data,
+  canUpdate,
+  isSaving,
+  onSave,
+}: {
+  data: ShipmentV2ShippingSection;
+  canUpdate: boolean;
+  isSaving: boolean;
+  onSave: (payload: ShipmentV2ShippingSection) => void;
+}) {
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [providerType, setProviderType] = React.useState<ShipmentV2ShippingProviderType | "">("");
+  const [providerName, setProviderName] = React.useState("");
+  const [rows, setRows] = React.useState<ShippingContainerDraftRow[]>([]);
+  const [rowErrors, setRowErrors] = React.useState<Record<string, string>>({});
+
+  const resetDraft = React.useCallback(() => {
+    const containerRows = data.containerRows || [];
+    setProviderType(data.providerType || "");
+    setProviderName(data.providerName || "");
+    setRows(
+      containerRows.length
+        ? containerRows.map((row, index) => ({
+          ...row,
+          id: `shipping-${index}-${row.containerNumber}`,
+        }))
+        : [{
+          id: "shipping-empty",
+          containerNumber: "",
+          dischargeDate: "",
+          deliveryOrderDate: "",
+          arrivalNoticeDate: "",
+        }]
+    );
+    setRowErrors({});
+  }, [data]);
+
+  React.useEffect(() => {
+    if (!isEditing) resetDraft();
+  }, [isEditing, resetDraft]);
+
+  const updateRow = (rowId: string, updates: Partial<ShipmentV2ShippingContainerRow>) => {
+    setRows((current) => current.map((row) => (row.id === rowId ? { ...row, ...updates } : row)));
+    setRowErrors((current) => {
+      if (!current[rowId]) return current;
+      const next = { ...current };
+      delete next[rowId];
+      return next;
+    });
+  };
+
+  const addRow = () => {
+    setRows((current) => {
+      if (current.length >= 100) return current;
+      return [
+        ...current,
+        {
+          id: `shipping-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          containerNumber: "",
+          dischargeDate: "",
+          deliveryOrderDate: "",
+          arrivalNoticeDate: "",
+        },
+      ];
+    });
+  };
+
+  const removeRow = (rowId: string) => {
+    setRows((current) => {
+      const next = current.filter((row) => row.id !== rowId);
+      return next.length
+        ? next
+        : [{
+          id: "shipping-empty",
+          containerNumber: "",
+          dischargeDate: "",
+          deliveryOrderDate: "",
+          arrivalNoticeDate: "",
+        }];
+    });
+    setRowErrors((current) => {
+      if (!current[rowId]) return current;
+      const next = { ...current };
+      delete next[rowId];
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    const nextErrors: Record<string, string> = {};
+    const seenContainerNumbers = new Map<string, string>();
+    const normalizedRows = rows.map((row) => {
+      const containerNumber = row.containerNumber.trim().replace(/\s+/g, " ").toUpperCase();
+      return {
+        id: row.id,
+        containerNumber,
+        dischargeDate: row.dischargeDate || "",
+        deliveryOrderDate: row.deliveryOrderDate || "",
+        arrivalNoticeDate: row.arrivalNoticeDate || "",
+      };
+    });
+
+    for (const row of normalizedRows) {
+      const hasOperationalDate = Boolean(row.dischargeDate || row.deliveryOrderDate || row.arrivalNoticeDate);
+      if (!row.containerNumber && hasOperationalDate) {
+        nextErrors[row.id] = "برای ثبت تاریخ‌ها، شماره کانتینر را وارد کنید.";
+        continue;
+      }
+      if (!row.containerNumber) continue;
+      const duplicateRowId = seenContainerNumbers.get(row.containerNumber);
+      if (duplicateRowId) {
+        nextErrors[row.id] = "شماره کانتینر تکراری است.";
+        nextErrors[duplicateRowId] = "شماره کانتینر تکراری است.";
+      } else {
+        seenContainerNumbers.set(row.containerNumber, row.id);
+      }
+    }
+
+    if (Object.keys(nextErrors).length) {
+      setRowErrors(nextErrors);
+      return;
+    }
+
+    onSave({
+      providerType: providerType || null,
+      providerName: providerType ? providerName.trim() : "",
+      containerRows: normalizedRows
+        .filter((row) => row.containerNumber)
+        .map((row) => ({
+          containerNumber: row.containerNumber,
+          dischargeDate: row.dischargeDate,
+          deliveryOrderDate: row.deliveryOrderDate,
+          arrivalNoticeDate: row.arrivalNoticeDate,
+        })),
+    });
+    setIsEditing(false);
+  };
+
+  const savedRows = data.containerRows || [];
+  const providerNameLabel = providerType ? `نام ${shippingProviderLabels[providerType]}` : "نام لاین کشتیرانی / فورواردر";
+  const savedProviderNameLabel = data.providerType
+    ? `نام ${shippingProviderLabels[data.providerType]}`
+    : "نام لاین کشتیرانی / فورواردر";
+
+  return (
+    <div className="space-y-2.5">
+      {isEditing ? (
+        <div className="space-y-2.5">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="shipment-v2-shipping-provider-type" className="text-[10px] font-bold text-muted-foreground sm:text-xs">
+                نوع ارائه‌دهنده حمل
+              </Label>
+              <select
+                id="shipment-v2-shipping-provider-type"
+                data-testid="shipment-v2-shipping-provider-type"
+                className={compactSelectClassName}
+                value={providerType}
+                onChange={(event) => {
+                  const nextProviderType = (event.target.value || "") as ShipmentV2ShippingProviderType | "";
+                  if (nextProviderType !== providerType) setProviderName("");
+                  setProviderType(nextProviderType);
+                }}
+              >
+                <option value="">انتخاب نشده</option>
+                <option value="SHIPPING_LINE">لاین کشتیرانی</option>
+                <option value="FORWARDER">فورواردر</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="shipment-v2-shipping-provider-name" className="text-[10px] font-bold text-muted-foreground sm:text-xs">
+                {providerNameLabel}
+              </Label>
+              <Input
+                id="shipment-v2-shipping-provider-name"
+                data-testid="shipment-v2-shipping-provider-name"
+                className="h-8 rounded-lg text-[11px] font-bold sm:h-9 sm:text-xs"
+                value={providerName}
+                disabled={!providerType}
+                onChange={(event) => setProviderName(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-black text-muted-foreground sm:text-xs">کانتینرها</p>
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="shipment-v2-shipping-add"
+                className="h-7 cursor-pointer rounded-md px-2.5 text-[10px] font-black sm:h-8 sm:text-[11px]"
+                onClick={addRow}
+                disabled={rows.length >= 100}
+              >
+                افزودن کانتینر
+              </Button>
+            </div>
+            {rows.map((row, index) => {
+              const numberInputId = `shipment-v2-shipping-container-${index}-number`;
+              return (
+                <div key={row.id} data-testid={`shipment-v2-shipping-row-${index}`} className="rounded-lg border border-border bg-muted/20 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-black text-muted-foreground">کانتینر {(index + 1).toLocaleString("fa-IR")}</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 cursor-pointer rounded-md text-muted-foreground hover:text-red-600"
+                      onClick={() => removeRow(row.id)}
+                      aria-label={`حذف کانتینر ${index + 1}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-2 gap-1.5 md:grid-cols-4">
+                    <div className="col-span-2 min-w-0 space-y-1 md:col-span-1">
+                      <Label htmlFor={numberInputId} className="text-[9px] font-bold text-muted-foreground sm:text-[10px]">
+                        شماره کانتینر
+                      </Label>
+                      <Input
+                        id={numberInputId}
+                        data-testid={`shipment-v2-shipping-row-${index}-number`}
+                        className="h-8 min-w-0 rounded-lg px-2 text-[11px] font-bold uppercase sm:h-9 sm:text-xs"
+                        dir="ltr"
+                        value={row.containerNumber}
+                        onChange={(event) => updateRow(row.id, { containerNumber: event.target.value })}
+                      />
+                    </div>
+                    <div data-testid={`shipment-v2-shipping-row-${index}-discharge-date`} className="min-w-0">
+                      <ShamsiDateTimeField
+                        id={`shipment-v2-shipping-row-${index}-discharge-date-field`}
+                        label="تاریخ تخلیه"
+                        value={row.dischargeDate || ""}
+                        onChange={(dischargeDate) => updateRow(row.id, { dischargeDate })}
+                        showTime={false}
+                        triggerClassName="h-8 rounded-lg text-[10px] font-bold sm:h-9 sm:text-[11px]"
+                      />
+                    </div>
+                    <div data-testid={`shipment-v2-shipping-row-${index}-delivery-order-date`} className="min-w-0">
+                      <ShamsiDateTimeField
+                        id={`shipment-v2-shipping-row-${index}-delivery-order-date-field`}
+                        label="تاریخ ترخیصیه"
+                        value={row.deliveryOrderDate || ""}
+                        onChange={(deliveryOrderDate) => updateRow(row.id, { deliveryOrderDate })}
+                        showTime={false}
+                        triggerClassName="h-8 rounded-lg text-[10px] font-bold sm:h-9 sm:text-[11px]"
+                      />
+                    </div>
+                    <div data-testid={`shipment-v2-shipping-row-${index}-arrival-notice-date`} className="col-span-2 min-w-0 md:col-span-1">
+                      <ShamsiDateTimeField
+                        id={`shipment-v2-shipping-row-${index}-arrival-notice-date-field`}
+                        label="تاریخ اعلامیه ورود"
+                        value={row.arrivalNoticeDate || ""}
+                        onChange={(arrivalNoticeDate) => updateRow(row.id, { arrivalNoticeDate })}
+                        showTime={false}
+                        triggerClassName="h-8 rounded-lg text-[10px] font-bold sm:h-9 sm:text-[11px]"
+                      />
+                    </div>
+                  </div>
+                  {rowErrors[row.id] ? (
+                    <p role="alert" className="mt-1.5 text-[10px] font-bold text-red-600">
+                      {rowErrors[row.id]}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 gap-2">
+            <BaseInfoCard label="نوع ارائه‌دهنده حمل" testId="shipment-v2-shipping-provider-type-value">
+              {data.providerType ? shippingProviderLabels[data.providerType] : "ثبت نشده"}
+            </BaseInfoCard>
+            <BaseInfoCard label={savedProviderNameLabel} testId="shipment-v2-shipping-provider-name-value">
+              {displayValue(data.providerName)}
+            </BaseInfoCard>
+          </div>
+          {savedRows.length ? (
+            <div className="grid gap-2">
+              {savedRows.map((row, index) => (
+                <div key={`${row.containerNumber}-${index}`} className="rounded-lg border border-border bg-muted/20 p-2">
+                  <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
+                    <BaseInfoCard label="شماره کانتینر" testId={`shipment-v2-shipping-row-${index}-number-value`} className="col-span-2 md:col-span-1">
+                      <span dir="ltr">{displayValue(row.containerNumber)}</span>
+                    </BaseInfoCard>
+                    <BaseInfoCard label="تاریخ تخلیه" testId={`shipment-v2-shipping-row-${index}-discharge-date-value`}>
+                      {displayShamsiDate(row.dischargeDate)}
+                    </BaseInfoCard>
+                    <BaseInfoCard label="تاریخ ترخیصیه" testId={`shipment-v2-shipping-row-${index}-delivery-order-date-value`}>
+                      {displayShamsiDate(row.deliveryOrderDate)}
+                    </BaseInfoCard>
+                    <BaseInfoCard label="تاریخ اعلامیه ورود" testId={`shipment-v2-shipping-row-${index}-arrival-notice-date-value`} className="col-span-2 md:col-span-1">
+                      {displayShamsiDate(row.arrivalNoticeDate)}
+                    </BaseInfoCard>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 p-2.5 text-[11px] font-bold leading-5 text-muted-foreground">
+              <Anchor className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span>هنوز اطلاعات کانتینری ثبت نشده است.</span>
+            </div>
+          )}
+        </div>
+      )}
+      <SectionActions
+        canUpdate={canUpdate}
+        isSaving={isSaving}
+        isEditing={isEditing}
+        testIdPrefix="shipment-v2-shipping"
+        onEdit={() => setIsEditing(true)}
+        onCancel={() => {
+          resetDraft();
+          setIsEditing(false);
+        }}
+        onSave={handleSave}
       />
     </div>
   );
@@ -2325,6 +2664,7 @@ export default function ShipmentDetail() {
           {sectionDefinitions.map((section) => {
             const Icon = section.icon;
             if (section.key === "notes") return null;
+            if (section.key === "shipping" && !isImportShipShipmentV2Flow(profile.flowCode)) return null;
             if (section.key === "base") {
               return (
                 <React.Fragment key={section.key}>
@@ -2380,6 +2720,20 @@ export default function ShipmentDetail() {
                       dailyStatusRow={dailyStatusRow}
                       isSaving={savingSection === "declarationKootaj"}
                       onSave={(payload) => void saveSection("declarationKootaj", payload)}
+                    />
+                  </SectionCard>
+                </React.Fragment>
+              );
+            }
+            if (section.key === "shipping") {
+              return (
+                <React.Fragment key={section.key}>
+                  <SectionCard sectionKey={section.key} title={section.title} icon={Icon}>
+                    <ShippingSection
+                      data={profile.sections.shipping}
+                      canUpdate={canUpdate}
+                      isSaving={savingSection === "shipping"}
+                      onSave={(payload) => void saveSection("shipping", payload)}
                     />
                   </SectionCard>
                 </React.Fragment>

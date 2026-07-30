@@ -2,7 +2,7 @@ import React from "react";
 import AdminPanel, { type AdminTabKey } from "./AdminPanel";
 import { AdminLayout, type AdminNavItem } from "@/src/components/admin/AdminLayout";
 
-const adminSections: AdminNavItem[] = [
+const adminSectionDefinitions: AdminNavItem[] = [
   {
     key: "overview",
     label: "نمای کلی",
@@ -12,6 +12,11 @@ const adminSections: AdminNavItem[] = [
     key: "organizations",
     label: "شرکت‌ها",
     description: "ایجاد دستی، وضعیت و نمای شرکت‌ها",
+  },
+  {
+    key: "contacts",
+    label: "درخواست‌های دمو",
+    description: "پیگیری فرم‌های ورودی سایت",
   },
   {
     key: "subscriptions",
@@ -32,6 +37,11 @@ const adminSections: AdminNavItem[] = [
 
 export default function AdminConsole() {
   const [activeSection, setActiveSection] = React.useState<AdminTabKey>("overview");
+  const [newContactRequestCount, setNewContactRequestCount] = React.useState(0);
+  const adminSections = React.useMemo(
+    () => adminSectionDefinitions.map((item) => item.key === "contacts" ? { ...item, count: newContactRequestCount } : item),
+    [newContactRequestCount]
+  );
 
   return (
     <AdminLayout
@@ -39,7 +49,12 @@ export default function AdminConsole() {
       activeSection={activeSection}
       onSectionChange={(section) => setActiveSection(section)}
     >
-      <AdminPanel activeTab={activeSection} onTabChange={setActiveSection} embedded />
+      <AdminPanel
+        activeTab={activeSection}
+        onTabChange={setActiveSection}
+        onContactRequestCountChange={setNewContactRequestCount}
+        embedded
+      />
     </AdminLayout>
   );
 }

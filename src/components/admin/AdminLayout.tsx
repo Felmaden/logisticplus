@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageSquareText,
   ReceiptText,
   ShieldCheck,
 } from "lucide-react";
@@ -24,6 +25,7 @@ import { useAppStore } from "@/src/store/useAppStore";
 export type AdminSectionKey =
   | "overview"
   | "organizations"
+  | "contacts"
   | "subscriptions"
   | "billing"
   | "errors";
@@ -38,6 +40,7 @@ export type AdminNavItem = {
 const iconBySection: Record<AdminSectionKey, React.ElementType> = {
   overview: LayoutDashboard,
   organizations: Building2,
+  contacts: MessageSquareText,
   subscriptions: ShieldCheck,
   billing: ReceiptText,
   errors: FileWarning,

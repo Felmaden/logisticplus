@@ -9,7 +9,7 @@ The current repository uses:
 - Express through [server.js](server.js), which is a compatibility bridge into [server/src/server.js](server/src/server.js) for API startup and production static serving.
 - PostgreSQL through the raw `pg` pool plus module repositories under [server/src/modules](server/src/modules). [src/server/db.js](src/server/db.js) remains as the legacy aggregate data-access layer for APIs and scripts that still need it.
 - SQL schema setup through [db/schema.sql](db/schema.sql).
-- Password login with platform-admin controlled company/user provisioning. Public self-serve checkout, contact intake, marketing plan pages, and phone-code worker surfaces are not active in the public-release app.
+- Password login with platform-admin controlled company/user provisioning. The public landing page accepts demo requests for platform-admin review; self-serve checkout/account creation, marketing plan pages, and phone-code worker surfaces remain inactive.
 
 Do not assume this project is Next.js or Prisma-based unless the stack is deliberately changed later.
 
@@ -18,8 +18,8 @@ Do not assume this project is Next.js or Prisma-based unless the stack is delibe
 Last checked: 2026-06-19.
 
 - Local app is running on `http://localhost:3000`; `/api/health` and `/api/db/health` return ok.
-- Browser smoke should check `/`, `/login`, `/dashboard`, `/admin`, and token-based public tracking routes. `/` shows the login entry; removed public marketing/self-serve/search routes redirect to login.
-- The protected app currently opens for the seeded owner session. Admin includes manual organization/user provisioning, historical signup/contact review, subscription limits, billing records, and operational errors.
+- Browser smoke should check `/`, `/login`, `/dashboard`, `/admin`, and token-based public tracking routes. `/` shows the public product landing page; retired self-serve/search routes redirect to login.
+- The protected app currently opens for the seeded owner session. Admin includes manual organization/user provisioning, demo-request review, subscription limits, billing records, and operational errors.
 - Latest verified local full Playwright E2E result: 146 passed, 3 skipped after `npm.cmd run test:e2e:setup` reset `logisticplus_test`.
 - `npm.cmd run lint`, `node --check server.js`, `node --check src/server/db.js`, `npm.cmd run build`, migration verification, and production-config smoke checks should pass before deploy. The build still emits Vite's existing large chunk warning.
 - In the Codex desktop sandbox, Vite/esbuild may fail to read parent directories while loading `vite.config.ts`; rerunning the same build outside the sandbox passed.
@@ -122,6 +122,7 @@ Important variables:
 - `SEED_USER_ID`: owner user id used by the bridge script; defaults to `u1`.
 - `SEED_ORGANIZATION_ID`: default organization id used by the bridge script.
 - `APP_PUBLIC_URL`: public base URL used for generated links.
+- `VITE_PUBLIC_WHATSAPP_NUMBER`: optional digits-only international WhatsApp number used by the landing page (for example `98912...`); when empty, the WhatsApp action is hidden.
 - `PORT`: HTTP port used by `server.js`; defaults to `3000`.
 - `DOCUMENT_STORAGE_DIR`: local upload storage directory.
 - `DOCUMENT_MAX_BYTES`: max upload size in bytes.
@@ -204,7 +205,7 @@ npm run start
 
 Public routes include:
 
-- `/`
+- `/` (public product landing page and demo request form)
 - `/login`
 - `/track/:token`
 

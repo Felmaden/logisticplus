@@ -24,7 +24,6 @@ import { useNavigate } from "react-router-dom";
 export default function Settings() {
   const navigate = useNavigate();
   const [settings, setSettings] = useState({
-    pushNotifications: true,
     emailAlerts: false,
     darkMode: true,
     compactMode: false,
@@ -161,16 +160,14 @@ export default function Settings() {
             <CardDescription className="text-[10px] text-muted-foreground mt-1">مدیریت کانال‌های دریافت اعلان محموله‌ها</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6 pt-2">
-            <div className="flex items-center justify-between group">
+            <div className="flex items-center justify-between gap-4">
               <div className="space-y-0.5">
                 <Label className="text-sm font-bold text-foreground">اعلان‌های مرورگر</Label>
-                <p className="text-[10px] text-muted-foreground">دریافت هشدار مستقیم روی دسکتاپ</p>
+                <p className="text-[10px] text-muted-foreground">وضعیت واقعی دستگاه، فعال‌سازی و ارسال اعلان آزمایشی</p>
               </div>
-              <Switch 
-                checked={settings.pushNotifications} 
-                onCheckedChange={() => toggleSetting('pushNotifications')}
-                className="data-[state=checked]:bg-primary" 
-              />
+              <Button type="button" size="sm" variant="outline" onClick={() => navigate("/profile?tab=notifications")}>
+                مدیریت در پروفایل
+              </Button>
             </div>
             <Separator className="bg-border/50" />
             <div className="flex items-center justify-between group">

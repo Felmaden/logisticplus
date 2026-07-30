@@ -30,6 +30,8 @@ const DOCUMENT_MAX_BYTES = Number(process.env.DOCUMENT_MAX_BYTES || 25 * 1024 * 
 const CHAT_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 const CHAT_AUDIO_MAX_BYTES = 10 * 1024 * 1024;
 const CHAT_FILE_MAX_BYTES = 15 * 1024 * 1024;
+const CHAT_BATCH_MAX_BYTES = 40 * 1024 * 1024;
+const CHAT_BATCH_MAX_FILES = 5;
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -38,7 +40,7 @@ const upload = multer({
 
 const chatAttachmentUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: CHAT_FILE_MAX_BYTES, files: 1 },
+  limits: { fileSize: CHAT_FILE_MAX_BYTES, files: CHAT_BATCH_MAX_FILES },
 });
 
 const documentTypeAllowlist = new Map([
@@ -651,6 +653,49 @@ export async function persistChatAttachmentFile(file, options = {}) {
   };
 }
 
+export async function persistChatAttachmentFiles(files = [], options = {}) {
+  const batch = Array.isArray(files) ? files.filter(Boolean) : [];
+  if (!batch.length) {
+    return { error: chatAttachmentValidationError("FILE_REQUIRED", "File is required.", 400) };
+  }
+  if (batch.length > CHAT_BATCH_MAX_FILES) {
+    return {
+      error: chatAttachmentValidationError(
+        "TOO_MANY_FILES",
+        `You can attach up to ${CHAT_BATCH_MAX_FILES} files to one message.`,
+        413
+      ),
+    };
+  }
+  const totalBytes = batch.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  if (totalBytes > CHAT_BATCH_MAX_BYTES) {
+    return {
+      error: chatAttachmentValidationError(
+        "ATTACHMENT_BATCH_TOO_LARGE",
+        "The combined attachment size must not exceed 40 MB.",
+        413
+      ),
+    };
+  }
+
+  for (const file of batch) {
+    const displayFileName = normalizeUploadedDisplayFileName(file?.originalname, "attachment");
+    const validation = validateChatAttachmentFile(file, displayFileName);
+    if (!validation.ok) return { error: validation };
+  }
+
+  const persisted = [];
+  for (const file of batch) {
+    const stored = await persistChatAttachmentFile(file, options);
+    if (stored.error) {
+      await Promise.allSettled(persisted.map((item) => cleanupStoredDocumentWrite(item)));
+      return { error: stored.error };
+    }
+    persisted.push(stored);
+  }
+  return { attachments: persisted, totalBytes };
+}
+
 export async function cleanupPersistedDocument(persisted) {
   await cleanupStoredDocumentWrite(persisted);
 }
@@ -754,6 +799,26 @@ export function uploadChatAttachmentSingle(req, res) {
     chatAttachmentUpload.single("file")(req, res, (error) => {
       if (error) reject(error);
       else resolve();
+    });
+  });
+}
+
+export function uploadChatAttachments(req, res) {
+  return new Promise((resolve, reject) => {
+    chatAttachmentUpload.fields([
+      { name: "file", maxCount: 1 },
+      { name: "files", maxCount: CHAT_BATCH_MAX_FILES },
+    ])(req, res, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      const groupedFiles = req.files && !Array.isArray(req.files) ? req.files : {};
+      req.chatAttachmentFiles = [
+        ...(groupedFiles.file || []),
+        ...(groupedFiles.files || []),
+      ];
+      resolve();
     });
   });
 }

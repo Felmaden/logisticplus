@@ -1155,7 +1155,7 @@ CREATE TABLE IF NOT EXISTS chat_message_read_receipts (
   user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
   read_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (message_id, user_id)
+  CONSTRAINT chat_message_read_receipts_thread_message_user_key UNIQUE (thread_id, message_id, user_id)
 );
 
 CREATE TABLE IF NOT EXISTS chat_message_events (
@@ -1195,6 +1195,35 @@ CREATE TABLE IF NOT EXISTS chat_message_attachments (
   storage_delete_error TEXT,
   CONSTRAINT chat_message_attachments_type_check CHECK (attachment_type IN ('image', 'document', 'audio')),
   CONSTRAINT chat_message_attachments_size_check CHECK (size_bytes >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS chat_group_shipment_bridges (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  group_thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+  shipment_thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+  shipment_id TEXT REFERENCES shipments(id) ON DELETE SET NULL,
+  activated_by_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
+  activated_by_message_id TEXT REFERENCES chat_messages(id) ON DELETE SET NULL,
+  activated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  deactivated_by_id TEXT REFERENCES app_users(id) ON DELETE SET NULL,
+  deactivated_at TIMESTAMPTZ,
+  deactivation_reason TEXT,
+  CONSTRAINT chat_group_shipment_bridges_distinct_threads_check
+    CHECK (group_thread_id <> shipment_thread_id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_message_forward_deliveries (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  bridge_id TEXT REFERENCES chat_group_shipment_bridges(id) ON DELETE SET NULL,
+  message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+  source_thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+  target_thread_id TEXT NOT NULL REFERENCES chat_threads(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT chat_message_forward_deliveries_distinct_threads_check
+    CHECK (source_thread_id <> target_thread_id),
+  UNIQUE (message_id, target_thread_id)
 );
 
 CREATE TABLE IF NOT EXISTS documents (
@@ -1281,9 +1310,74 @@ CREATE TABLE IF NOT EXISTS notifications (
   source_type TEXT,
   source_id TEXT,
   legacy_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  event_key TEXT,
   read_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS notifications_org_user_event_key_uidx
+  ON notifications (organization_id, user_id, event_key)
+  WHERE event_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS chat_push_subscriptions (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL,
+  endpoint_hash TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  expiration_time TIMESTAMPTZ,
+  user_agent TEXT,
+  disabled_at TIMESTAMPTZ,
+  disabled_reason TEXT,
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at TIMESTAMPTZ,
+  last_success_at TIMESTAMPTZ,
+  last_failure_at TIMESTAMPTZ,
+  last_failure_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT chat_push_subscriptions_failure_count_check CHECK (failure_count >= 0),
+  CONSTRAINT chat_push_subscriptions_endpoint_hash_check CHECK (char_length(endpoint_hash) = 64)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS chat_push_subscriptions_endpoint_hash_uidx
+  ON chat_push_subscriptions (endpoint_hash);
+
+CREATE INDEX IF NOT EXISTS chat_push_subscriptions_org_user_active_idx
+  ON chat_push_subscriptions (organization_id, user_id, disabled_at)
+  WHERE disabled_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS notification_push_deliveries (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  notification_id TEXT NOT NULL REFERENCES notifications(id) ON DELETE CASCADE,
+  subscription_id TEXT NOT NULL REFERENCES chat_push_subscriptions(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at TIMESTAMPTZ,
+  sent_at TIMESTAMPTZ,
+  last_error TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT notification_push_deliveries_status_check
+    CHECK (status IN ('pending', 'processing', 'sent', 'failed')),
+  CONSTRAINT notification_push_deliveries_attempt_count_check
+    CHECK (attempt_count >= 0),
+  UNIQUE (notification_id, subscription_id)
+);
+
+CREATE INDEX IF NOT EXISTS notification_push_deliveries_pending_idx
+  ON notification_push_deliveries (status, next_attempt_at, created_at)
+  WHERE status IN ('pending', 'processing');
+
+CREATE INDEX IF NOT EXISTS notification_push_deliveries_org_status_idx
+  ON notification_push_deliveries (organization_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS notification_push_deliveries_notification_idx
+  ON notification_push_deliveries (notification_id);
 
 CREATE TABLE IF NOT EXISTS sms_deliveries (
   id TEXT PRIMARY KEY,
@@ -1518,6 +1612,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS chat_threads_org_direct_key_uidx ON chat_threa
 CREATE INDEX IF NOT EXISTS chat_threads_org_shipment_idx ON chat_threads (organization_id, shipment_id) WHERE shipment_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS chat_threads_org_shipment_active_uidx ON chat_threads (organization_id, shipment_id) WHERE shipment_id IS NOT NULL AND type = 'SHIPMENT' AND archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS chat_read_receipts_org_thread_user_idx ON chat_message_read_receipts (organization_id, thread_id, user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS chat_group_shipment_bridges_one_active_group_uidx ON chat_group_shipment_bridges (organization_id, group_thread_id) WHERE deactivated_at IS NULL;
+CREATE INDEX IF NOT EXISTS chat_group_shipment_bridges_org_shipment_active_idx ON chat_group_shipment_bridges (organization_id, shipment_thread_id, activated_at DESC) WHERE deactivated_at IS NULL;
+CREATE INDEX IF NOT EXISTS chat_group_shipment_bridges_org_group_history_idx ON chat_group_shipment_bridges (organization_id, group_thread_id, activated_at DESC);
+CREATE INDEX IF NOT EXISTS chat_message_forward_deliveries_org_target_created_idx ON chat_message_forward_deliveries (organization_id, target_thread_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS chat_message_forward_deliveries_org_source_created_idx ON chat_message_forward_deliveries (organization_id, source_thread_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS chat_message_events_org_thread_created_idx ON chat_message_events (organization_id, thread_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS chat_message_attachments_org_created_idx ON chat_message_attachments (organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS chat_message_attachments_message_idx ON chat_message_attachments (message_id);

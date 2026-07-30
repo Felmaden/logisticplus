@@ -265,12 +265,13 @@ interface MockStore {
   deleteUser: (id: string) => void;
   addDocument: (document: Omit<ShipmentDocument, "id" | "createdAt">) => void;
   deleteDocument: (id: string) => void;
-  addCommercialCard: (card: Omit<CommercialCard, "id" | "createdAt" | "updatedAt"> & { id?: string }) => void;
-  updateCommercialCard: (id: string, updates: Partial<Omit<CommercialCard, "id" | "createdAt">>) => void;
-  deleteCommercialCard: (id: string) => void;
+  addCommercialCard: (card: Omit<CommercialCard, "id" | "createdAt" | "updatedAt"> & { id?: string }) => Promise<void>;
+  updateCommercialCard: (id: string, updates: Partial<Omit<CommercialCard, "id" | "createdAt">>) => Promise<void>;
+  deleteCommercialCard: (id: string) => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
   markAllNotificationsRead: () => Promise<void>;
   addNotification: (notification: Omit<Notification, "id" | "isRead" | "createdAt" | "link"> & { link?: string }) => void;
+  receiveNotification: (notification: Notification) => void;
   updateCurrentUser: (updates: Partial<User>) => void;
   deletedItems: { id: string, entityType: string, data: any, deletedAt: string }[];
   softDelete: (id: string, entityType: string) => void;
@@ -295,7 +296,7 @@ interface MockStore {
 let suppressNextDatabaseSave = false;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-export const useAppStore = create<MockStore>((set) => ({
+export const useAppStore = create<MockStore>((set, get) => ({
   currentUser: getStoredCurrentUser(),
   users: [],
   customers: [],
@@ -966,7 +967,8 @@ export const useAppStore = create<MockStore>((set) => ({
   deleteDocument: (id) => set((state) => ({
     documents: state.documents.filter(d => d.id !== id)
   })),
-  addCommercialCard: (card) => set((state) => {
+  addCommercialCard: async (card) => {
+    const previousCards = get().commercialCards;
     const now = new Date().toISOString();
     const newCard: CommercialCard = {
       ...card,
@@ -974,22 +976,52 @@ export const useAppStore = create<MockStore>((set) => ({
       createdAt: now,
       updatedAt: now,
     };
-    return {
+    suppressNextDatabaseSave = true;
+    set((state) => ({
       commercialCards: [newCard, ...state.commercialCards],
-    };
-  }),
-  updateCommercialCard: (id, updates) => set((state) => ({
-    commercialCards: state.commercialCards.map((card) =>
-      card.id === id ? { ...card, ...updates, updatedAt: new Date().toISOString() } : card
-    ),
-  })),
-  deleteCommercialCard: (id) => set((state) => ({
-    commercialCards: state.commercialCards.map((card) =>
-      card.id === id
-        ? { ...card, isArchived: true, archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-        : card
-    ),
-  })),
+    }));
+    try {
+      await persistCurrentCollectionsNow(["commercialCards"]);
+    } catch (error) {
+      suppressNextDatabaseSave = true;
+      set({ commercialCards: previousCards });
+      throw error;
+    }
+  },
+  updateCommercialCard: async (id, updates) => {
+    const previousCards = get().commercialCards;
+    suppressNextDatabaseSave = true;
+    set((state) => ({
+      commercialCards: state.commercialCards.map((card) =>
+        card.id === id ? { ...card, ...updates, updatedAt: new Date().toISOString() } : card
+      ),
+    }));
+    try {
+      await persistCurrentCollectionsNow(["commercialCards"]);
+    } catch (error) {
+      suppressNextDatabaseSave = true;
+      set({ commercialCards: previousCards });
+      throw error;
+    }
+  },
+  deleteCommercialCard: async (id) => {
+    const previousCards = get().commercialCards;
+    suppressNextDatabaseSave = true;
+    set((state) => ({
+      commercialCards: state.commercialCards.map((card) =>
+        card.id === id
+          ? { ...card, isArchived: true, archivedAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+          : card
+      ),
+    }));
+    try {
+      await persistCurrentCollectionsNow(["commercialCards"]);
+    } catch (error) {
+      suppressNextDatabaseSave = true;
+      set({ commercialCards: previousCards });
+      throw error;
+    }
+  },
   markNotificationRead: async (id) => {
     const previousNotifications = useAppStore.getState().notifications;
     suppressNextDatabaseSave = true;
@@ -1046,6 +1078,20 @@ export const useAppStore = create<MockStore>((set) => ({
         ...state.notifications
       ]
     }));
+  },
+  receiveNotification: (notification) => {
+    suppressNextDatabaseSave = true;
+    set((state) => {
+      const existing = state.notifications.find((item) => item.id === notification.id);
+      const notifications = existing
+        ? state.notifications.map((item) => item.id === notification.id ? { ...item, ...notification } : item)
+        : [notification, ...state.notifications];
+      const unreadCount = notifications.filter((item) => !item.isRead).length;
+      if ("setAppBadge" in navigator) {
+        void navigator.setAppBadge(unreadCount).catch(() => {});
+      }
+      return { notifications };
+    });
   },
   addUser: (user) => set((state) => {
     const freshUser = { ...user, id: `u${Date.now()}` };
@@ -1249,8 +1295,11 @@ export const useAppStore = create<MockStore>((set) => ({
   }),
 }));
 
-const buildDatabasePayload = (state: MockStore) => {
-  return COLLECTION_KEYS.reduce((records, key) => {
+const buildDatabasePayload = (
+  state: MockStore,
+  collectionKeys: readonly (typeof COLLECTION_KEYS)[number][] = COLLECTION_KEYS
+) => {
+  return collectionKeys.reduce((records, key) => {
     if (CANONICAL_API_COLLECTIONS.has(key)) return records;
     if (DISABLED_UI_COLLECTIONS.has(key)) return records;
     records[key] = (state as any)[key] || [];
@@ -1258,7 +1307,10 @@ const buildDatabasePayload = (state: MockStore) => {
   }, {} as Record<string, any[]>);
 };
 
-const saveStateToDatabase = async (state: MockStore) => {
+const saveStateToDatabase = async (
+  state: MockStore,
+  collectionKeys: readonly (typeof COLLECTION_KEYS)[number][] = COLLECTION_KEYS
+) => {
   if (!state.currentUser || !state.hasHydratedFromDatabase || state.isHydratingFromDatabase) {
     return;
   }
@@ -1266,11 +1318,11 @@ const saveStateToDatabase = async (state: MockStore) => {
   const response = await fetch(`/api/users/${state.currentUser.id}/records`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ records: buildDatabasePayload(state) }),
+    body: JSON.stringify({ records: buildDatabasePayload(state, collectionKeys) }),
   });
 
   if (!response.ok) {
-    throw new Error("Database save failed.");
+    throw await createApiRequestError(response, "Database save failed.");
   }
 };
 
@@ -1280,6 +1332,16 @@ async function persistCurrentStateNow() {
     saveTimer = null;
   }
   await saveStateToDatabase(useAppStore.getState());
+}
+
+async function persistCurrentCollectionsNow(
+  collectionKeys: readonly (typeof COLLECTION_KEYS)[number][]
+) {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  await saveStateToDatabase(useAppStore.getState(), collectionKeys);
 }
 
 useAppStore.subscribe((state) => {

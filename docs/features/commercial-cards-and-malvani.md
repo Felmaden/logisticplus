@@ -31,6 +31,27 @@ Each contact supports custom name, role/title, phone number, optional label, opt
 
 Commercial Card extra contacts are also embedded into the existing `commercialCards` compatibility record for this V1 so the current bootstrap/Daily Status/Shipment Detail flow is not disrupted. The protected contacts API still validates commercial card ownership through the tenant-scoped `user_records` collection.
 
+Commercial Card operational data is embedded in the same tenant-scoped compatibility record:
+
+- invoice number and order-registration number
+- total value amount and currency
+- bank and branch
+- allocation date
+- commitment-settlement deadline
+- remaining commitment amount and currency
+- goods description and tariff code
+- order-registration expiry date
+
+The UI derives the commitment and order-registration alerts from their Shamsi deadline fields. Commitment alerts are treated as settled only when a remaining-commitment amount was explicitly saved as zero. These fields are optional so existing cards remain readable and editable without a data backfill.
+
+Commercial Card expiry uses one required Shamsi expiration date. The old issue-date value is retained only as optional legacy data and is no longer collected or displayed. The notification worker creates one deduplicated reminder in each active milestone window:
+
+- two months before expiry
+- one month before expiry
+- one week before expiry
+
+Each organization user can opt out through the `commercialCardExpiry` notification preference. Missed older milestones are not replayed when a card is entered late; only the currently relevant milestone is sent. The notification links back to the Commercial Cards page and can also enter the existing Web Push outbox when push is enabled.
+
 ## API Behavior
 
 Protected Malvani APIs:

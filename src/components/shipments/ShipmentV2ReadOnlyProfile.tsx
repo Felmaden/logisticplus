@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { isShipmentTerminalStatus, shipmentStatusLabel } from "@/src/shared/shipment-statuses.js";
 import {
+  isImportShipShipmentV2Flow,
   isLanjShipmentV2Flow,
   shipmentV2ClassificationLabel,
   shipmentV2FlowCodeForShipmentType,
@@ -40,6 +41,7 @@ import type {
   ShipmentV2FlowCode,
   ShipmentV2ProfileResponse,
   ShipmentV2Sections,
+  ShipmentV2ShippingProviderType,
   ShipmentV2ShipmentSummary,
 } from "@/src/types";
 
@@ -65,6 +67,11 @@ const customsTaxStatusLabels: Record<string, string> = {
   GOOD_STANDING: "خوش حسابی",
 };
 
+const shippingProviderLabels: Record<ShipmentV2ShippingProviderType, string> = {
+  SHIPPING_LINE: "لاین کشتیرانی",
+  FORWARDER: "فورواردر",
+};
+
 const malvaniActiveStatusLabels: Record<string, string> = {
   ACTIVE: "فعال",
   INACTIVE: "غیرفعال",
@@ -76,6 +83,7 @@ const emptySections: ShipmentV2Sections = {
   orderRegistration: {},
   goods: { goodsRows: [] },
   declarationKootaj: {},
+  shipping: { providerType: null, providerName: "", containerRows: [] },
   permits: { permitRows: [] },
   payments: {},
   banking: {},
@@ -298,6 +306,10 @@ export function ShipmentV2ReadOnlyProfile({
       ...emptySections.declarationKootaj,
       ...(data.profile?.sections.declarationKootaj || {}),
     },
+    shipping: {
+      ...emptySections.shipping,
+      ...(data.profile?.sections.shipping || {}),
+    },
     permits: {
       ...emptySections.permits,
       ...(data.profile?.sections.permits || {}),
@@ -317,6 +329,7 @@ export function ShipmentV2ReadOnlyProfile({
   };
   const base = sections.base;
   const isLanj = isLanjShipmentV2Flow(flowCode);
+  const isImportShip = isImportShipShipmentV2Flow(flowCode);
   const credentialLabel = isLanj ? "ملوانی" : "کارت بازرگانی";
   const credentialId = isLanj ? base.malvaniProfileId : base.commercialCardId;
   const credentialDisplay = isLanj ? base.malvaniDisplayName : base.commercialCardDisplayName;
@@ -480,6 +493,39 @@ export function ShipmentV2ReadOnlyProfile({
             </ReadField>
           </div>
         </ProfileSection>
+
+        {isImportShip ? (
+          <ProfileSection title="کشتیرانی" icon={Anchor} testId="document-management-profile-shipping">
+            <div className="grid grid-cols-2 gap-2">
+              <ReadField label="نوع ارائه‌دهنده حمل">
+                {sections.shipping.providerType ? shippingProviderLabels[sections.shipping.providerType] : EMPTY_TEXT}
+              </ReadField>
+              <ReadField label={sections.shipping.providerType ? `نام ${shippingProviderLabels[sections.shipping.providerType]}` : "نام لاین کشتیرانی / فورواردر"}>
+                {sections.shipping.providerName}
+              </ReadField>
+            </div>
+            {(sections.shipping.containerRows || []).length ? (
+              <div className="mt-2 grid gap-2">
+                {(sections.shipping.containerRows || []).map((row, index) => (
+                  <div key={`${row.containerNumber}-${index}`} className="rounded-lg border border-border bg-muted/20 p-2">
+                    <div className="grid grid-cols-2 gap-1.5 md:grid-cols-4">
+                      <ReadField label="شماره کانتینر">
+                        <span dir="ltr">{displayValue(row.containerNumber)}</span>
+                      </ReadField>
+                      <ReadField label="تاریخ تخلیه">{formatDate(row.dischargeDate)}</ReadField>
+                      <ReadField label="تاریخ ترخیصیه">{formatDate(row.deliveryOrderDate)}</ReadField>
+                      <ReadField label="تاریخ اعلامیه ورود">{formatDate(row.arrivalNoticeDate)}</ReadField>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 rounded-lg border border-dashed border-border bg-background px-3 py-3 text-xs font-bold text-muted-foreground">
+                اطلاعات کانتینری ثبت نشده است.
+              </div>
+            )}
+          </ProfileSection>
+        ) : null}
 
         <ProfileSection title="مجوزها" icon={ShieldCheck} testId="document-management-profile-permits">
           {permitRows.length ? (

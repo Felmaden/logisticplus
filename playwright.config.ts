@@ -46,6 +46,10 @@ export default defineConfig({
       SEED_USER_PASSWORD: testSeedPassword,
       ZARINPAL_SANDBOX: "true",
       DISABLE_HMR: "true",
+      CHAT_PUSH_ENABLED: "true",
+      WEB_PUSH_VAPID_PUBLIC_KEY: "BLBjqYXfSM1AS2VTNODmuOdb4RsbmcNmh-ABRGOOJ3zxMxZiG4EPf69w8Afj4yxgN1z6-nGB230rAqDpOhr6zq8",
+      WEB_PUSH_VAPID_PRIVATE_KEY: "aL6uvDKd4gFp1Xu0Fr3shIQT-rDCaU8NNTtsIQSihI0",
+      WEB_PUSH_VAPID_SUBJECT: "mailto:test@logisticplus.local",
     },
   },
   projects: [

@@ -1,16 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns-jalali";
 import {
+  AlertTriangle,
   Anchor,
   Archive,
+  Banknote,
+  Barcode,
+  Building2,
   CalendarClock,
+  CalendarDays,
   CheckCircle2,
+  CircleDollarSign,
   ClockAlert,
   Eye,
   FileText,
+  Hash,
   IdCard,
+  Landmark,
   Loader2,
   Paperclip,
+  Package,
   Pencil,
   Phone,
   Plus,
@@ -56,16 +65,30 @@ import type {
   CommercialCardStatus,
   MalvaniActiveStatus,
   MalvaniProfile,
+  ShipmentV2CurrencyCode,
 } from "@/src/types";
 
 type ActiveTab = "commercialCards" | "malvani";
-type StatusFilter = "ALL" | CommercialCardStatus;
+type StatusFilter = "ALL" | CommercialCardStatus | "NEEDS_ATTENTION";
+type DeadlineAlertStatus = "NOT_SET" | "SETTLED" | "OVERDUE" | "DUE_SOON" | "ON_TRACK";
 
 type CommercialCardFormState = {
   holderName: string;
   cardNumber: string;
-  issueDate: string;
   expirationDate: string;
+  invoiceNumber: string;
+  orderRegistrationNumber: string;
+  totalValueAmount: string;
+  totalValueCurrency: ShipmentV2CurrencyCode;
+  bankName: string;
+  bankBranch: string;
+  allocationDate: string;
+  commitmentSettlementDeadline: string;
+  remainingCommitmentAmount: string;
+  remainingCommitmentCurrency: ShipmentV2CurrencyCode;
+  goodsDescription: string;
+  tariffCode: string;
+  orderRegistrationExpiryDate: string;
   nationalId: string;
   responsibleName: string;
   responsiblePhone: string;
@@ -104,8 +127,20 @@ type DocumentDraft = {
 const emptyCardForm: CommercialCardFormState = {
   holderName: "",
   cardNumber: "",
-  issueDate: "",
   expirationDate: "",
+  invoiceNumber: "",
+  orderRegistrationNumber: "",
+  totalValueAmount: "",
+  totalValueCurrency: "IRR",
+  bankName: "",
+  bankBranch: "",
+  allocationDate: "",
+  commitmentSettlementDeadline: "",
+  remainingCommitmentAmount: "",
+  remainingCommitmentCurrency: "IRR",
+  goodsDescription: "",
+  tariffCode: "",
+  orderRegistrationExpiryDate: "",
   nationalId: "",
   responsibleName: "",
   responsiblePhone: "",
@@ -167,10 +202,52 @@ const malvaniStatusMeta: Record<MalvaniActiveStatus, { label: string; className:
 
 const filterOptions: { value: StatusFilter; label: string }[] = [
   { value: "ALL", label: "همه" },
+  { value: "NEEDS_ATTENTION", label: "نیازمند اقدام" },
   { value: "VALID", label: "معتبر" },
   { value: "EXPIRING_SOON", label: "نزدیک به انقضا" },
   { value: "EXPIRED", label: "منقضی‌شده" },
 ];
+
+const currencyOptions: ShipmentV2CurrencyCode[] = ["IRR", "USD", "EUR", "AED", "CNY"];
+const currencyLabels: Record<ShipmentV2CurrencyCode, string> = {
+  IRR: "ریال",
+  USD: "دلار",
+  EUR: "یورو",
+  AED: "درهم",
+  CNY: "یوان",
+};
+
+const deadlineAlertMeta: Record<DeadlineAlertStatus, {
+  label: string;
+  icon: typeof CheckCircle2;
+  className: string;
+}> = {
+  NOT_SET: {
+    label: "تاریخ ثبت نشده",
+    icon: CalendarDays,
+    className: "border-slate-500/20 bg-slate-500/10 text-slate-700",
+  },
+  SETTLED: {
+    label: "تعهد تسویه شده",
+    icon: CheckCircle2,
+    className: "border-emerald-500/20 bg-emerald-500/10 text-emerald-700",
+  },
+  OVERDUE: {
+    label: "مهلت گذشته",
+    icon: AlertTriangle,
+    className: "border-rose-500/20 bg-rose-500/10 text-rose-700",
+  },
+  DUE_SOON: {
+    label: "نزدیک به سررسید",
+    icon: ClockAlert,
+    className: "border-amber-500/20 bg-amber-500/10 text-amber-700",
+  },
+  ON_TRACK: {
+    label: "در مهلت",
+    icon: CheckCircle2,
+    className: "border-sky-500/20 bg-sky-500/10 text-sky-700",
+  },
+};
 
 const activeStatusOptions: { value: MalvaniActiveStatus; label: string }[] = [
   { value: "ACTIVE", label: "فعال" },
@@ -204,6 +281,56 @@ const getCommercialCardStatus = (expirationDate: string): CommercialCardStatus =
 const formatShamsiDate = (value?: string) => {
   const datePart = getShamsiDatePart(value);
   return datePart ? toPersianDigits(datePart) : "ثبت نشده";
+};
+
+const normalizeMoneyInput = (value: string) =>
+  toEnglishDigits(value).trim().replace(/[\s,٬،]/g, "");
+
+const parseOptionalMoney = (value: string) => {
+  const normalized = normalizeMoneyInput(value);
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const moneyFormValue = (value?: number | string | null) =>
+  value === undefined || value === null ? "" : String(value);
+
+const formatMoney = (amount?: number | null, currency: ShipmentV2CurrencyCode = "IRR") => {
+  if (amount === undefined || amount === null || !Number.isFinite(Number(amount))) return "ثبت نشده";
+  return `${Number(amount).toLocaleString("fa-IR", { maximumFractionDigits: 2 })} ${currencyLabels[currency]}`;
+};
+
+const formatBankAndBranch = (bankName?: string, bankBranch?: string) => {
+  const parts = [bankName?.trim(), bankBranch?.trim()].filter(Boolean);
+  return parts.length ? parts.join(" — ") : "ثبت نشده";
+};
+
+const hasProvidedMoney = (value?: number | null) => value !== undefined && value !== null;
+
+const getDeadlineAlert = (value?: string, settled = false) => {
+  if (settled) return { status: "SETTLED" as const, daysRemaining: null };
+  const deadline = parseDateStart(value);
+  if (!deadline) return { status: "NOT_SET" as const, daysRemaining: null };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  deadline.setHours(0, 0, 0, 0);
+  const daysRemaining = Math.round((deadline.getTime() - today.getTime()) / 86_400_000);
+  if (daysRemaining < 0) return { status: "OVERDUE" as const, daysRemaining };
+  if (daysRemaining <= 30) return { status: "DUE_SOON" as const, daysRemaining };
+  return { status: "ON_TRACK" as const, daysRemaining };
+};
+
+const hasUrgentOperationalAlert = (card: CommercialCard) => {
+  const commitmentSettled =
+    hasProvidedMoney(card.remainingCommitmentAmount) &&
+    Number(card.remainingCommitmentAmount) === 0;
+  const alerts = [
+    getDeadlineAlert(card.commitmentSettlementDeadline, commitmentSettled),
+    getDeadlineAlert(card.orderRegistrationExpiryDate),
+  ];
+  return alerts.some(({ status }) => status === "OVERDUE" || status === "DUE_SOON");
 };
 
 const formatUploadDate = (value: string) => {
@@ -290,8 +417,20 @@ const makeContactFromDraft = (
 const toFormState = (card: CommercialCard): CommercialCardFormState => ({
   holderName: card.holderName || "",
   cardNumber: card.cardNumber || "",
-  issueDate: card.issueDate || "",
   expirationDate: card.expirationDate || "",
+  invoiceNumber: card.invoiceNumber || "",
+  orderRegistrationNumber: card.orderRegistrationNumber || "",
+  totalValueAmount: moneyFormValue(card.totalValueAmount),
+  totalValueCurrency: card.totalValueCurrency || "IRR",
+  bankName: card.bankName || "",
+  bankBranch: card.bankBranch || "",
+  allocationDate: card.allocationDate || "",
+  commitmentSettlementDeadline: card.commitmentSettlementDeadline || "",
+  remainingCommitmentAmount: moneyFormValue(card.remainingCommitmentAmount),
+  remainingCommitmentCurrency: card.remainingCommitmentCurrency || "IRR",
+  goodsDescription: card.goodsDescription || "",
+  tariffCode: card.tariffCode || "",
+  orderRegistrationExpiryDate: card.orderRegistrationExpiryDate || "",
   nationalId: card.nationalId || "",
   responsibleName: card.responsibleName || "",
   responsiblePhone: card.responsiblePhone || "",
@@ -335,6 +474,206 @@ function MalvaniStatusBadge({ status }: { status: MalvaniActiveStatus }) {
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
   return <p className="text-[11px] font-bold text-destructive">{message}</p>;
+}
+
+function MoneyInputField({
+  id,
+  label,
+  amount,
+  currency,
+  error,
+  onAmountChange,
+  onCurrencyChange,
+}: {
+  id: string;
+  label: string;
+  amount: string;
+  currency: ShipmentV2CurrencyCode;
+  error?: string;
+  onAmountChange: (value: string) => void;
+  onCurrencyChange: (value: ShipmentV2CurrencyCode) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs font-bold text-muted-foreground">{label}</Label>
+      <div className="grid grid-cols-[minmax(0,1fr)_104px] gap-2">
+        <Input
+          id={id}
+          data-testid={`${id}-amount`}
+          value={amount}
+          onChange={(event) => onAmountChange(event.target.value)}
+          inputMode="decimal"
+          placeholder="۰"
+          className="h-10 min-w-0 rounded-xl border-border bg-muted text-left text-xs font-bold"
+          dir="ltr"
+          aria-invalid={Boolean(error)}
+        />
+        <select
+          data-testid={`${id}-currency`}
+          value={currency}
+          onChange={(event) => onCurrencyChange(event.target.value as ShipmentV2CurrencyCode)}
+          aria-label={`نوع ارز ${label}`}
+          className="h-10 min-w-0 rounded-xl border border-border bg-muted px-2 text-xs font-black text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-primary/20"
+        >
+          {currencyOptions.map((option) => (
+            <option key={option} value={option}>{currencyLabels[option]}</option>
+          ))}
+        </select>
+      </div>
+      <FieldError message={error} />
+    </div>
+  );
+}
+
+function OperationalInfoBox({
+  label,
+  value,
+  icon: Icon,
+  testId,
+}: {
+  label: string;
+  value?: React.ReactNode;
+  icon: typeof CheckCircle2;
+  testId: string;
+}) {
+  const hasValue = value !== undefined && value !== null && value !== "" && value !== "ثبت نشده";
+  return (
+    <div
+      data-testid={testId}
+      className="min-w-0 rounded-lg border border-border bg-muted/30 p-2.5"
+    >
+      <div className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+        <span className="truncate text-[10px] font-black">{label}</span>
+      </div>
+      <p className={cn(
+        "mt-1.5 break-words text-[11px] font-black leading-5",
+        hasValue ? "text-foreground" : "text-muted-foreground"
+      )}>
+        {hasValue ? value : "ثبت نشده"}
+      </p>
+    </div>
+  );
+}
+
+function DeadlineInfoBox({
+  label,
+  value,
+  settled = false,
+  testId,
+}: {
+  label: string;
+  value?: string;
+  settled?: boolean;
+  testId: string;
+}) {
+  const alert = getDeadlineAlert(value, settled);
+  const meta = deadlineAlertMeta[alert.status];
+  const Icon = meta.icon;
+  const remainingLabel = alert.daysRemaining === null
+    ? null
+    : alert.daysRemaining < 0
+      ? `${toPersianDigits(Math.abs(alert.daysRemaining))} روز از مهلت گذشته`
+      : alert.daysRemaining === 0
+        ? "سررسید امروز"
+        : `${toPersianDigits(alert.daysRemaining)} روز مانده`;
+
+  return (
+    <div
+      data-testid={testId}
+      className={cn(
+        "col-span-2 min-w-0 rounded-lg border p-2.5",
+        meta.className
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="text-[10px] font-black">{label}</span>
+          </div>
+          <p className="mt-1.5 text-xs font-black text-foreground">{formatShamsiDate(value)}</p>
+        </div>
+        <Badge
+          variant="outline"
+          className={cn("h-7 shrink-0 rounded-full px-2.5 text-[10px] font-black", meta.className)}
+        >
+          {meta.label}
+        </Badge>
+      </div>
+      {remainingLabel ? <p className="mt-1.5 text-[10px] font-black">{remainingLabel}</p> : null}
+    </div>
+  );
+}
+
+function CommercialCardOperationalGrid({ card }: { card: CommercialCard }) {
+  const commitmentSettled =
+    hasProvidedMoney(card.remainingCommitmentAmount) &&
+    Number(card.remainingCommitmentAmount) === 0;
+
+  return (
+    <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" data-testid="commercial-card-operational-info">
+      <OperationalInfoBox
+        label="شماره فاکتور"
+        value={card.invoiceNumber ? toPersianDigits(card.invoiceNumber) : undefined}
+        icon={FileText}
+        testId="commercial-card-invoice-number"
+      />
+      <OperationalInfoBox
+        label="ثبت سفارش"
+        value={card.orderRegistrationNumber ? toPersianDigits(card.orderRegistrationNumber) : undefined}
+        icon={Hash}
+        testId="commercial-card-order-registration"
+      />
+      <OperationalInfoBox
+        label="ارزش کل"
+        value={formatMoney(card.totalValueAmount, card.totalValueCurrency || "IRR")}
+        icon={CircleDollarSign}
+        testId="commercial-card-total-value"
+      />
+      <OperationalInfoBox
+        label="بانک و شعبه"
+        value={formatBankAndBranch(card.bankName, card.bankBranch)}
+        icon={Landmark}
+        testId="commercial-card-bank-branch"
+      />
+      <OperationalInfoBox
+        label="تاریخ تخصیص"
+        value={formatShamsiDate(card.allocationDate)}
+        icon={CalendarClock}
+        testId="commercial-card-allocation-date"
+      />
+      <OperationalInfoBox
+        label="مانده تعهد"
+        value={formatMoney(card.remainingCommitmentAmount, card.remainingCommitmentCurrency || "IRR")}
+        icon={Banknote}
+        testId="commercial-card-remaining-commitment"
+      />
+      <OperationalInfoBox
+        label="کالا"
+        value={card.goodsDescription}
+        icon={Package}
+        testId="commercial-card-goods"
+      />
+      <OperationalInfoBox
+        label="تعرفه"
+        value={card.tariffCode ? toPersianDigits(card.tariffCode) : undefined}
+        icon={Barcode}
+        testId="commercial-card-tariff-code"
+      />
+      <DeadlineInfoBox
+        label="آلارم مهلت رفع تعهد"
+        value={card.commitmentSettlementDeadline}
+        settled={commitmentSettled}
+        testId="commercial-card-commitment-deadline-alert"
+      />
+      <DeadlineInfoBox
+        label="آلارم انقضای ثبت سفارش"
+        value={card.orderRegistrationExpiryDate}
+        testId="commercial-card-order-expiry-alert"
+      />
+    </div>
+  );
 }
 
 function ContactList({ contacts }: { contacts: BusinessEntityContact[] }) {
@@ -546,6 +885,7 @@ export default function CommercialCards() {
   const [editingCommercialContactId, setEditingCommercialContactId] = useState<string | null>(null);
   const [viewingCard, setViewingCard] = useState<CommercialCard | null>(null);
   const [cardToDelete, setCardToDelete] = useState<CommercialCard | null>(null);
+  const [isSavingCommercialCard, setIsSavingCommercialCard] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [malvaniProfiles, setMalvaniProfiles] = useState<MalvaniProfile[]>([]);
@@ -582,12 +922,26 @@ export default function CommercialCards() {
     const term = normalizeSearch(searchTerm);
     return cardsWithStatus
       .filter(({ card, status }) => {
-        const matchesStatus = statusFilter === "ALL" || status === statusFilter;
+        const matchesStatus =
+          statusFilter === "ALL" ||
+          (statusFilter === "NEEDS_ATTENTION" ? hasUrgentOperationalAlert(card) : status === statusFilter);
         if (!matchesStatus) return false;
         if (!term) return true;
         const searchable = [
           card.holderName,
           card.cardNumber,
+          card.invoiceNumber,
+          card.orderRegistrationNumber,
+          card.totalValueAmount === undefined || card.totalValueAmount === null ? "" : String(card.totalValueAmount),
+          card.totalValueCurrency,
+          card.bankName,
+          card.bankBranch,
+          card.goodsDescription,
+          card.tariffCode,
+          card.remainingCommitmentAmount === undefined || card.remainingCommitmentAmount === null
+            ? ""
+            : String(card.remainingCommitmentAmount),
+          card.remainingCommitmentCurrency,
           card.responsibleName,
           card.nationalId,
           ...(card.contacts || []).flatMap((contact) => [contact.contactName, contact.roleTitle, contact.phoneNumber]),
@@ -718,18 +1072,19 @@ export default function CommercialCards() {
     const nextErrors: Record<string, string> = {};
     const holderName = formData.holderName.trim();
     const cardNumber = formData.cardNumber.trim();
-    const issueDate = formData.issueDate.trim();
     const expirationDate = formData.expirationDate.trim();
 
     if (!holderName) nextErrors.holderName = "وارد کردن نام شرکت / دارنده کارت الزامی است.";
     if (!cardNumber) nextErrors.cardNumber = "وارد کردن شماره کارت بازرگانی الزامی است.";
-    if (!issueDate) nextErrors.issueDate = "وارد کردن تاریخ صدور الزامی است.";
     if (!expirationDate) nextErrors.expirationDate = "وارد کردن تاریخ انقضا الزامی است.";
 
-    const issue = parseDateStart(issueDate);
-    const expiration = parseDateEnd(expirationDate);
-    if (issueDate && expirationDate && issue && expiration && expiration.getTime() < issue.getTime()) {
-      nextErrors.expirationDate = "تاریخ انقضا نمی‌تواند قبل از تاریخ صدور باشد.";
+    const totalValue = normalizeMoneyInput(formData.totalValueAmount);
+    const remainingCommitment = normalizeMoneyInput(formData.remainingCommitmentAmount);
+    if (totalValue && !/^\d+(?:\.\d+)?$/.test(totalValue)) {
+      nextErrors.totalValueAmount = "ارزش کل باید یک عدد غیرمنفی معتبر باشد.";
+    }
+    if (remainingCommitment && !/^\d+(?:\.\d+)?$/.test(remainingCommitment)) {
+      nextErrors.remainingCommitmentAmount = "مانده تعهد باید یک عدد غیرمنفی معتبر باشد.";
     }
 
     setFormErrors(nextErrors);
@@ -804,7 +1159,8 @@ export default function CommercialCards() {
     setEditingMalvaniContactId(null);
   };
 
-  const handleSaveCard = () => {
+  const handleSaveCard = async () => {
+    if (isSavingCommercialCard) return;
     const errors = validateForm();
     const firstError = Object.values(errors)[0];
     if (firstError) {
@@ -826,8 +1182,20 @@ export default function CommercialCards() {
       id: cardId,
       holderName: formData.holderName.trim(),
       cardNumber: formData.cardNumber.trim(),
-      issueDate: formData.issueDate.trim(),
       expirationDate: formData.expirationDate.trim(),
+      invoiceNumber: formData.invoiceNumber.trim(),
+      orderRegistrationNumber: formData.orderRegistrationNumber.trim(),
+      totalValueAmount: parseOptionalMoney(formData.totalValueAmount),
+      totalValueCurrency: formData.totalValueCurrency,
+      bankName: formData.bankName.trim(),
+      bankBranch: formData.bankBranch.trim(),
+      allocationDate: formData.allocationDate.trim(),
+      commitmentSettlementDeadline: formData.commitmentSettlementDeadline.trim(),
+      remainingCommitmentAmount: parseOptionalMoney(formData.remainingCommitmentAmount),
+      remainingCommitmentCurrency: formData.remainingCommitmentCurrency,
+      goodsDescription: formData.goodsDescription.trim(),
+      tariffCode: formData.tariffCode.trim(),
+      orderRegistrationExpiryDate: formData.orderRegistrationExpiryDate.trim(),
       nationalId: formData.nationalId.trim(),
       responsibleName: formData.responsibleName.trim(),
       responsiblePhone: formData.responsiblePhone.trim(),
@@ -838,18 +1206,21 @@ export default function CommercialCards() {
       archivedAt: "",
     };
 
+    setIsSavingCommercialCard(true);
     try {
       if (editingCardId) {
-        updateCommercialCard(editingCardId, payload);
+        await updateCommercialCard(editingCardId, payload);
         toast.success("کارت بازرگانی با موفقیت ویرایش شد.");
       } else {
-        addCommercialCard(payload);
+        await addCommercialCard(payload);
         toast.success("کارت بازرگانی با موفقیت ثبت شد.");
       }
       setIsFormOpen(false);
       resetForm();
-    } catch {
-      toast.error("خطایی رخ داد. لطفاً دوباره تلاش کنید.");
+    } catch (error) {
+      toast.error(apiErrorMessage(error, "ذخیره کارت بازرگانی ناموفق بود. لطفاً دوباره تلاش کنید."));
+    } finally {
+      setIsSavingCommercialCard(false);
     }
   };
 
@@ -1019,7 +1390,7 @@ export default function CommercialCards() {
                   <Input
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
-                    placeholder="جستجو در نام شرکت، شماره کارت، مسئول یا مخاطبین..."
+                    placeholder="جستجو در شرکت، فاکتور، ثبت سفارش، کالا، بانک، تعرفه یا مخاطبین..."
                     className="h-10 rounded-xl border-border bg-muted pr-10 text-xs font-bold"
                   />
                 </div>
@@ -1058,7 +1429,14 @@ export default function CommercialCards() {
                 const status = getCommercialCardStatus(card.expirationDate);
                 const contacts = (card.contacts || []).filter((contact) => !contact.archivedAt);
                 return (
-                  <Card key={card.id} className="rounded-xl border-border bg-card shadow-sm" data-testid="commercial-card-item">
+                  <Card
+                    key={card.id}
+                    className={cn(
+                      "rounded-xl border-border bg-card shadow-sm",
+                      hasUrgentOperationalAlert(card) && "border-amber-500/35"
+                    )}
+                    data-testid="commercial-card-item"
+                  >
                     <CardContent className="space-y-4 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div className="min-w-0">
@@ -1068,11 +1446,7 @@ export default function CommercialCards() {
                         </div>
                         <StatusBadge status={status} />
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs font-bold text-muted-foreground md:grid-cols-4">
-                        <div className="rounded-lg border border-border bg-muted/30 p-3">
-                          <span className="block text-[10px] font-black">صدور</span>
-                          <span className="mt-1 block text-foreground">{formatShamsiDate(card.issueDate)}</span>
-                        </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs font-bold text-muted-foreground">
                         <div className="rounded-lg border border-border bg-muted/30 p-3">
                           <span className="block text-[10px] font-black">انقضا</span>
                           <span className="mt-1 block text-foreground">{formatShamsiDate(card.expirationDate)}</span>
@@ -1086,6 +1460,7 @@ export default function CommercialCards() {
                           <span className="mt-1 block text-foreground">{toPersianDigits(contacts.length)}</span>
                         </div>
                       </div>
+                      <CommercialCardOperationalGrid card={card} />
                       <div className="flex flex-wrap gap-2">
                         <Button type="button" variant="outline" size="sm" className="h-9 rounded-xl text-xs font-black" onClick={() => setViewingCard(card)}>
                           <Eye className="h-3.5 w-3.5" />
@@ -1268,18 +1643,6 @@ export default function CommercialCards() {
             </div>
             <div className="space-y-1.5">
               <ShamsiDateTimeField
-                id="commercial-issue-date"
-                label="تاریخ صدور"
-                value={formData.issueDate}
-                onChange={(issueDate) => setFormData((current) => ({ ...current, issueDate }))}
-                showTime={false}
-                required
-                triggerClassName="bg-muted"
-              />
-              <FieldError message={formErrors.issueDate} />
-            </div>
-            <div className="space-y-1.5">
-              <ShamsiDateTimeField
                 id="commercial-expiration-date"
                 label="تاریخ انقضا"
                 value={formData.expirationDate}
@@ -1327,6 +1690,132 @@ export default function CommercialCards() {
                 onChange={(event) => setFormData((current) => ({ ...current, description: event.target.value }))}
                 className="min-h-24 w-full rounded-xl border border-border bg-muted px-3 py-2 text-xs font-bold text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-primary/20"
               />
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-muted/25 p-3">
+            <div className="mb-3 flex items-start gap-2">
+              <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              <div>
+                <h3 className="text-sm font-black text-foreground">اطلاعات بازرگانی و تعهدات</h3>
+                <p className="mt-1 text-[11px] font-bold leading-5 text-muted-foreground">
+                  تاریخ‌های مهلت رفع تعهد و انقضای ثبت سفارش، آلارم‌های روی کارت را فعال می‌کنند.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="commercial-invoice-number" className="text-xs font-bold text-muted-foreground">شماره فاکتور</Label>
+                <Input
+                  id="commercial-invoice-number"
+                  data-testid="commercial-invoice-number"
+                  value={formData.invoiceNumber}
+                  onChange={(event) => setFormData((current) => ({ ...current, invoiceNumber: event.target.value }))}
+                  className="h-10 rounded-xl border-border bg-muted text-left text-xs font-bold"
+                  dir="ltr"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="commercial-order-registration-number" className="text-xs font-bold text-muted-foreground">ثبت سفارش</Label>
+                <Input
+                  id="commercial-order-registration-number"
+                  data-testid="commercial-order-registration-number"
+                  value={formData.orderRegistrationNumber}
+                  onChange={(event) => setFormData((current) => ({ ...current, orderRegistrationNumber: event.target.value }))}
+                  className="h-10 rounded-xl border-border bg-muted text-left text-xs font-bold"
+                  dir="ltr"
+                />
+              </div>
+
+              <MoneyInputField
+                id="commercial-total-value"
+                label="ارزش کل"
+                amount={formData.totalValueAmount}
+                currency={formData.totalValueCurrency}
+                error={formErrors.totalValueAmount}
+                onAmountChange={(totalValueAmount) => setFormData((current) => ({ ...current, totalValueAmount }))}
+                onCurrencyChange={(totalValueCurrency) => setFormData((current) => ({ ...current, totalValueCurrency }))}
+              />
+              <MoneyInputField
+                id="commercial-remaining-commitment"
+                label="مانده تعهد"
+                amount={formData.remainingCommitmentAmount}
+                currency={formData.remainingCommitmentCurrency}
+                error={formErrors.remainingCommitmentAmount}
+                onAmountChange={(remainingCommitmentAmount) => setFormData((current) => ({ ...current, remainingCommitmentAmount }))}
+                onCurrencyChange={(remainingCommitmentCurrency) => setFormData((current) => ({ ...current, remainingCommitmentCurrency }))}
+              />
+
+              <div className="space-y-1.5">
+                <Label htmlFor="commercial-bank-name" className="text-xs font-bold text-muted-foreground">بانک</Label>
+                <Input
+                  id="commercial-bank-name"
+                  data-testid="commercial-bank-name"
+                  value={formData.bankName}
+                  onChange={(event) => setFormData((current) => ({ ...current, bankName: event.target.value }))}
+                  className="h-10 rounded-xl border-border bg-muted text-xs font-bold"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="commercial-bank-branch" className="text-xs font-bold text-muted-foreground">شعبه</Label>
+                <Input
+                  id="commercial-bank-branch"
+                  data-testid="commercial-bank-branch"
+                  value={formData.bankBranch}
+                  onChange={(event) => setFormData((current) => ({ ...current, bankBranch: event.target.value }))}
+                  className="h-10 rounded-xl border-border bg-muted text-xs font-bold"
+                />
+              </div>
+
+              <ShamsiDateTimeField
+                id="commercial-allocation-date"
+                label="تاریخ تخصیص"
+                value={formData.allocationDate}
+                onChange={(allocationDate) => setFormData((current) => ({ ...current, allocationDate }))}
+                showTime={false}
+                triggerClassName="bg-muted"
+              />
+              <ShamsiDateTimeField
+                id="commercial-commitment-deadline"
+                label="مهلت رفع تعهد"
+                value={formData.commitmentSettlementDeadline}
+                onChange={(commitmentSettlementDeadline) => setFormData((current) => ({ ...current, commitmentSettlementDeadline }))}
+                showTime={false}
+                triggerClassName="bg-muted"
+              />
+
+              <ShamsiDateTimeField
+                id="commercial-order-registration-expiry"
+                label="تاریخ انقضای ثبت سفارش"
+                value={formData.orderRegistrationExpiryDate}
+                onChange={(orderRegistrationExpiryDate) => setFormData((current) => ({ ...current, orderRegistrationExpiryDate }))}
+                showTime={false}
+                triggerClassName="bg-muted"
+              />
+              <div className="space-y-1.5">
+                <Label htmlFor="commercial-tariff-code" className="text-xs font-bold text-muted-foreground">تعرفه</Label>
+                <Input
+                  id="commercial-tariff-code"
+                  data-testid="commercial-tariff-code"
+                  value={formData.tariffCode}
+                  onChange={(event) => setFormData((current) => ({ ...current, tariffCode: event.target.value }))}
+                  className="h-10 rounded-xl border-border bg-muted text-left text-xs font-bold"
+                  dir="ltr"
+                />
+              </div>
+
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="commercial-goods-description" className="text-xs font-bold text-muted-foreground">کالا</Label>
+                <Input
+                  id="commercial-goods-description"
+                  data-testid="commercial-goods-description"
+                  value={formData.goodsDescription}
+                  onChange={(event) => setFormData((current) => ({ ...current, goodsDescription: event.target.value }))}
+                  placeholder="نام یا شرح کالا / محصول"
+                  className="h-10 rounded-xl border-border bg-muted text-xs font-bold"
+                />
+              </div>
             </div>
           </div>
 
@@ -1431,11 +1920,16 @@ export default function CommercialCards() {
           </div>
 
           <DialogFooter className="gap-2 sm:justify-start">
-            <Button type="button" variant="ghost" className="h-10 rounded-xl text-xs font-black text-muted-foreground" onClick={() => setIsFormOpen(false)}>
+            <Button type="button" variant="ghost" className="h-10 rounded-xl text-xs font-black text-muted-foreground" onClick={() => setIsFormOpen(false)} disabled={isSavingCommercialCard}>
               انصراف
             </Button>
-            <Button type="button" data-testid="commercial-card-submit" className="h-10 rounded-xl bg-primary text-xs font-black text-primary-foreground hover:bg-primary/90" onClick={handleSaveCard}>
-              ذخیره
+            <Button type="button" data-testid="commercial-card-submit" className="h-10 rounded-xl bg-primary text-xs font-black text-primary-foreground hover:bg-primary/90" onClick={() => void handleSaveCard()} disabled={isSavingCommercialCard}>
+              {isSavingCommercialCard ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  در حال ذخیره...
+                </>
+              ) : "ذخیره"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1585,7 +2079,7 @@ export default function CommercialCards() {
       </Dialog>
 
       <Dialog open={Boolean(viewingCard)} onOpenChange={(open) => !open && setViewingCard(null)}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto rounded-xl border-border bg-card text-right text-foreground sm:max-w-2xl" dir="rtl">
+        <DialogContent className="max-h-[92vh] overflow-y-auto rounded-xl border-border bg-card text-right text-foreground sm:max-w-3xl" dir="rtl">
           {viewingCard ? (
             <>
               <DialogHeader>
@@ -1600,7 +2094,6 @@ export default function CommercialCards() {
               <div className="grid gap-3 sm:grid-cols-2">
                 {[
                   ["شماره کارت بازرگانی", viewingCard.cardNumber],
-                  ["تاریخ صدور", formatShamsiDate(viewingCard.issueDate)],
                   ["تاریخ انقضا", formatShamsiDate(viewingCard.expirationDate)],
                   ["کد ملی / شناسه ملی", viewingCard.nationalId || "ثبت نشده"],
                   ["نام شخص مسئول", viewingCard.responsibleName || "ثبت نشده"],
@@ -1623,6 +2116,13 @@ export default function CommercialCards() {
                     <p className="mt-1 text-xs font-bold leading-6 text-foreground">{viewingCard.description}</p>
                   </div>
                 ) : null}
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <div className="mb-3 flex items-center gap-2">
+                  <Building2 className="h-4 w-4 text-primary" aria-hidden="true" />
+                  <h3 className="text-sm font-black text-foreground">اطلاعات بازرگانی و تعهدات</h3>
+                </div>
+                <CommercialCardOperationalGrid card={viewingCard} />
               </div>
               <div className="rounded-xl border border-border bg-muted/25 p-3">
                 <div className="mb-3 flex items-center gap-2">
@@ -1742,7 +2242,7 @@ export default function CommercialCards() {
         onClose={() => setCardToDelete(null)}
         onConfirm={async () => {
           if (!cardToDelete) return;
-          deleteCommercialCard(cardToDelete.id);
+          await deleteCommercialCard(cardToDelete.id);
           toast.success("کارت بازرگانی غیرفعال شد.");
         }}
         title="غیرفعال‌سازی کارت بازرگانی"

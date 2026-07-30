@@ -11,6 +11,7 @@ import {
   registerAuthRoutes,
   registerBillingRoutes,
   registerBusinessEntityRoutes,
+  registerContactRequestRoutes,
   listCustomerRelated as listCustomerRelatedFromRepository,
   registerAuditRoutes,
   registerCustomerRoutes,
@@ -25,6 +26,8 @@ import {
   registerShipmentRoutes,
   registerTaskRoutes,
   registerUserRoutes,
+  startNotificationWorker,
+  toUiNotification,
 } from "./modules/index.js";
 import { createApiError } from "./shared/errors/api-error.js";
 import { requirePermission } from "./shared/middleware/permission.middleware.js";
@@ -96,7 +99,9 @@ import {
   listChangeLogs,
   listChatMessages,
   listChatMediaAttachments,
+  listChatMessageDeliveryThreadIds,
   listChatParticipants,
+  listChatShipmentOptions,
   listChatThreadMemberIds,
   listChatThreads,
   listCustomersDetailed,
@@ -118,6 +123,7 @@ import {
   replaceDocumentFileRecord,
   resolveAppErrorLog,
   removeChatThreadMember,
+  stopChatShipmentBridge,
   renewOrganizationSubscription,
   grantUserPermission,
   restoreEntityRecord,
@@ -153,10 +159,10 @@ import {
   cleanupPersistedDocument,
   deleteStoredChatAttachmentFiles,
   deleteStoredDocumentFiles,
-  persistChatAttachmentFile,
+  persistChatAttachmentFiles,
   sendStoredChatAttachment,
   sendStoredDocument,
-  uploadChatAttachmentSingle,
+  uploadChatAttachments,
 } from "../../src/server/document-storage.js";
 import {
   archiveEntityParamsSchema,
@@ -169,6 +175,8 @@ import {
   chatParticipantBodySchema,
   chatParticipantsQuerySchema,
   chatReadBodySchema,
+  chatClientContextBodySchema,
+  chatShipmentOptionsQuerySchema,
   chatThreadCreateBodySchema,
   chatThreadAttachmentParamsSchema,
   chatThreadParamsSchema,
@@ -359,6 +367,24 @@ function connectedChatUserIds(organizationId, userIds = []) {
   return connected;
 }
 
+function activeChatViewerUserIds(organizationId, threadId, userIds = []) {
+  const allowed = new Set(userIds);
+  const active = new Set();
+  for (const [, client] of chatClients.entries()) {
+    if (client.organizationId !== organizationId) continue;
+    if (allowed.size && !allowed.has(client.user.id)) continue;
+    if (
+      client.activeThreadId === threadId
+      && client.visibilityState === "visible"
+      && client.hasFocus
+      && client.joinedThreads.has(threadId)
+    ) {
+      active.add(client.user.id);
+    }
+  }
+  return active;
+}
+
 function broadcastChat(event, { organizationId, userIds } = {}) {
   if (!organizationId) return;
   const message = JSON.stringify(event);
@@ -369,6 +395,72 @@ function broadcastChat(event, { organizationId, userIds } = {}) {
     if (allowedUserIds && !allowedUserIds.has(client.user.id)) continue;
     ws.send(message);
   }
+}
+
+async function deliverCreatedChatMessage(created, {
+  organizationId,
+  sender,
+  requestId,
+} = {}) {
+  const notifiedUserIds = new Set();
+  for (const delivery of created.deliveries || []) {
+    const memberIds = await listChatThreadMemberIds(delivery.threadId, { organizationId });
+    const activeViewers = activeChatViewerUserIds(organizationId, delivery.threadId, memberIds);
+    const missedRecipientIds = memberIds.filter((userId) => (
+      userId !== sender.id
+      && !activeViewers.has(userId)
+      && !notifiedUserIds.has(userId)
+    ));
+    memberIds
+      .filter((userId) => userId !== sender.id)
+      .forEach((userId) => notifiedUserIds.add(userId));
+    try {
+      const notifications = await createChatMessageNotifications({
+        organizationId,
+        threadId: delivery.threadId,
+        messageId: delivery.message.id,
+        senderId: sender.id,
+        senderName: sender.name,
+        recipientUserIds: missedRecipientIds,
+      });
+      for (const notification of notifications) {
+        const payload = toUiNotification(notification);
+        if (!payload) continue;
+        broadcastChat(
+          { type: "notification.created", payload },
+          { organizationId, userIds: [notification.user_id] }
+        );
+      }
+    } catch (notificationError) {
+      console.error("Chat notification delivery failed:", notificationError);
+    }
+    broadcastChat(
+      { type: "message.created", ok: true, ...(requestId ? { requestId } : {}), payload: delivery.message },
+      { organizationId, userIds: memberIds }
+    );
+    broadcastChat(
+      { type: "thread.updated", payload: { threadId: delivery.threadId, lastMessage: delivery.message } },
+      { organizationId, userIds: memberIds }
+    );
+  }
+
+  if (created.bridgeChanged) {
+    const sourceDelivery = created.deliveries?.[0];
+    if (sourceDelivery) {
+      const memberIds = await listChatThreadMemberIds(sourceDelivery.threadId, { organizationId });
+      broadcastChat(
+        {
+          type: "shipment.bridge.updated",
+          payload: {
+            threadId: sourceDelivery.threadId,
+            activeShipmentBridge: created.activeShipmentBridge || null,
+          },
+        },
+        { organizationId, userIds: memberIds }
+      );
+    }
+  }
+  return created.message;
 }
 
 function parseCookies(cookieHeader = "") {
@@ -498,20 +590,6 @@ async function createAuthenticatedSessionResponse(req, res, user, { method = "pa
     requestContext: requestContext(req),
   });
   res.json({ user: { ...safeUser, permissions }, records });
-}
-
-function normalizeContactRequestBody(body = {}) {
-  const preferredContactMethod = ["phone", "email", "either"].includes(body.preferredContactMethod)
-    ? body.preferredContactMethod
-    : "phone";
-  return {
-    companyName: String(body.companyName || "").trim(),
-    contactName: String(body.contactName || "").trim(),
-    contactEmail: String(body.contactEmail || "").trim(),
-    contactPhone: String(body.contactPhone || "").trim(),
-    preferredContactMethod,
-    message: String(body.message || "").trim(),
-  };
 }
 
 function publicTrackLink(req, token) {
@@ -985,13 +1063,10 @@ async function startServer() {
     createApiError(res, 404, "NOT_FOUND", "This endpoint is not available in the public release app.");
 
   [
-    "/api/contact-requests",
     "/api/signup",
     "/api/admin/signup-requests",
     "/api/admin/signup-requests/:id/review",
     "/api/admin/signup-requests/:id",
-    "/api/admin/contact-requests",
-    "/api/admin/contact-requests/:id/resolve",
   ].forEach((route) => app.all(route, unavailablePublicReleaseEndpoint));
 
   app.get("/api/plans", async (_req, res) => {
@@ -1001,6 +1076,14 @@ async function startServer() {
       console.error("Plans failed:", error);
       createApiError(res, 500, "PLANS_FAILED", "Could not load subscription plans.");
     }
+  });
+
+  registerContactRequestRoutes(app, {
+    auditLog,
+    consumeRateLimit,
+    createApiError,
+    requestContext,
+    requirePlatformAdmin,
   });
 
   registerBillingRoutes(app, {
@@ -1513,6 +1596,23 @@ async function startServer() {
     }
   });
 
+  app.get("/api/chat/shipment-options", async (req, res) => {
+    try {
+      const tenantRequest = await requireChatTenantUser(req, res, "chat shipment options API");
+      if (!tenantRequest) return;
+      const query = parseRequestValue(res, chatShipmentOptionsQuerySchema, req.query || {});
+      if (!query) return;
+      const data = await listChatShipmentOptions(tenantRequest.user.id, {
+        organizationId: tenantRequest.organizationId,
+        search: query.q || "",
+        limit: 8,
+      });
+      res.json({ ok: true, data });
+    } catch (error) {
+      handleChatRouteError(res, error, "CHAT_SHIPMENT_OPTIONS_FAILED", "Could not load shipment suggestions.");
+    }
+  });
+
   app.get("/api/chat/threads", async (req, res) => {
     try {
       const tenantRequest = await requireChatTenantUser(req, res, "chat threads API");
@@ -1634,6 +1734,47 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/chat/threads/:id/shipment-bridge", async (req, res) => {
+    try {
+      const tenantRequest = await requireChatTenantUser(req, res, "chat shipment bridge API");
+      if (!tenantRequest) return;
+      const params = parseRequestValue(res, chatThreadParamsSchema, req.params);
+      if (!params) return;
+      const memberIds = await requireChatThreadMembership(
+        tenantRequest.user.id,
+        params.id,
+        { organizationId: tenantRequest.organizationId }
+      );
+      const data = await stopChatShipmentBridge(params.id, tenantRequest.user.id, {
+        organizationId: tenantRequest.organizationId,
+      });
+      await auditLog({
+        actorUserId: tenantRequest.user.id,
+        organizationId: tenantRequest.organizationId,
+        action: "chat.shipment_bridge_stop",
+        entityType: "chat_thread",
+        entityId: params.id,
+        summary: "Shipment forwarding was stopped for a chat group.",
+        before: {
+          shipmentId: data.shipmentId,
+          shipmentThreadId: data.shipmentThreadId,
+        },
+        after: { activeShipmentBridge: null },
+        requestContext: requestContext(req),
+      });
+      broadcastChat(
+        {
+          type: "shipment.bridge.updated",
+          payload: { threadId: params.id, activeShipmentBridge: null },
+        },
+        { organizationId: tenantRequest.organizationId, userIds: memberIds }
+      );
+      res.json({ ok: true, data });
+    } catch (error) {
+      handleChatRouteError(res, error, "CHAT_SHIPMENT_BRIDGE_STOP_FAILED", "Could not stop shipment forwarding.");
+    }
+  });
+
   app.get("/api/chat/threads/:id/messages", async (req, res) => {
     try {
       const tenantRequest = await requireChatTenantUser(req, res, "chat messages API");
@@ -1671,26 +1812,17 @@ async function startServer() {
         sendChatRateLimitedResponse(res, sendLimit);
         return;
       }
-      const message = await createChatMessage({
+      const created = await createChatMessage({
         threadId: params.id,
         sender: tenantRequest.user,
         organizationId: tenantRequest.organizationId,
         body: body.body,
         clientMessageId: body.clientMessageId,
       });
-      const memberIds = await listChatThreadMemberIds(params.id, { organizationId: tenantRequest.organizationId });
-      const connectedRecipients = connectedChatUserIds(tenantRequest.organizationId, memberIds);
-      const missedRecipientIds = memberIds.filter((userId) => userId !== tenantRequest.user.id && !connectedRecipients.has(userId));
-      await createChatMessageNotifications({
+      const message = await deliverCreatedChatMessage(created, {
         organizationId: tenantRequest.organizationId,
-        threadId: params.id,
-        messageId: message.id,
-        senderId: tenantRequest.user.id,
-        senderName: tenantRequest.user.name,
-        recipientUserIds: missedRecipientIds,
+        sender: tenantRequest.user,
       });
-      broadcastChat({ type: "message.created", ok: true, payload: message }, { organizationId: tenantRequest.organizationId, userIds: memberIds });
-      broadcastChat({ type: "thread.updated", payload: { threadId: params.id, lastMessage: message } }, { organizationId: tenantRequest.organizationId, userIds: memberIds });
       res.status(201).json({ ok: true, data: message });
     } catch (error) {
       handleChatRouteError(res, error, "CHAT_MESSAGE_SEND_FAILED", "Could not send message.");
@@ -1708,72 +1840,72 @@ async function startServer() {
         discriminator: tenantRequest.user.id,
       }))) return;
       await requireChatThreadMembership(tenantRequest.user.id, params.threadId, { organizationId: tenantRequest.organizationId });
-      await uploadChatAttachmentSingle(req, res);
+      await uploadChatAttachments(req, res);
       const body = parseRequestValue(res, chatAttachmentUploadBodySchema, req.body || {});
       if (!body) return;
 
-      const persisted = await persistChatAttachmentFile(req.file, { organizationId: tenantRequest.organizationId });
-      if (persisted.error) {
+      const persistedBatch = await persistChatAttachmentFiles(req.chatAttachmentFiles, {
+        organizationId: tenantRequest.organizationId,
+      });
+      if (persistedBatch.error) {
         return createApiError(
           res,
-          persisted.error.statusCode || 415,
-          persisted.error.code,
-          persisted.error.message,
-          persisted.error.field
+          persistedBatch.error.statusCode || 415,
+          persistedBatch.error.code,
+          persistedBatch.error.message,
+          persistedBatch.error.field
         );
       }
 
-      let message = null;
+      let created = null;
       try {
-        message = await createChatAttachmentMessage({
+        created = await createChatAttachmentMessage({
           threadId: params.threadId,
           sender: tenantRequest.user,
           organizationId: tenantRequest.organizationId,
           caption: body.caption || "",
           clientMessageId: body.clientMessageId,
-          attachment: persisted,
+          attachments: persistedBatch.attachments,
         });
       } catch (error) {
-        await cleanupPersistedDocument(persisted);
+        await Promise.allSettled(persistedBatch.attachments.map((persisted) => cleanupPersistedDocument(persisted)));
         throw error;
       }
-      const attachment = message.attachments?.[0] || null;
-      await auditLog({
-        actorUserId: tenantRequest.user.id,
+      const message = await deliverCreatedChatMessage(created, {
         organizationId: tenantRequest.organizationId,
-        action: "chat.attachment.upload",
-        entityType: "chat_attachment",
-        entityId: attachment?.id || message.id,
-        summary: "Chat attachment was uploaded.",
-        after: {
-          attachmentId: attachment?.id,
-          messageId: message.id,
-          threadId: params.threadId,
-          attachmentType: attachment?.attachmentType,
-          contentType: attachment?.contentType,
-          sizeBytes: attachment?.sizeBytes,
-          fileName: attachment?.filename,
-        },
-        metadata: documentStorageAuditMetadata(persisted),
-        requestContext: requestContext(req),
+        sender: tenantRequest.user,
       });
-      const memberIds = await listChatThreadMemberIds(params.threadId, { organizationId: tenantRequest.organizationId });
-      const connectedRecipients = connectedChatUserIds(tenantRequest.organizationId, memberIds);
-      const missedRecipientIds = memberIds.filter((userId) => userId !== tenantRequest.user.id && !connectedRecipients.has(userId));
-      await createChatMessageNotifications({
-        organizationId: tenantRequest.organizationId,
-        threadId: params.threadId,
-        messageId: message.id,
-        senderId: tenantRequest.user.id,
-        senderName: tenantRequest.user.name,
-        recipientUserIds: missedRecipientIds,
-      });
-      broadcastChat({ type: "message.created", ok: true, payload: message }, { organizationId: tenantRequest.organizationId, userIds: memberIds });
-      broadcastChat({ type: "thread.updated", payload: { threadId: params.threadId, lastMessage: message } }, { organizationId: tenantRequest.organizationId, userIds: memberIds });
+      for (let index = 0; index < message.attachments.length; index += 1) {
+        const attachment = message.attachments[index];
+        const persisted = persistedBatch.attachments[index];
+        await auditLog({
+          actorUserId: tenantRequest.user.id,
+          organizationId: tenantRequest.organizationId,
+          action: "chat.attachment.upload",
+          entityType: "chat_attachment",
+          entityId: attachment.id,
+          summary: "Chat attachment was uploaded.",
+          after: {
+            attachmentId: attachment.id,
+            messageId: message.id,
+            threadId: params.threadId,
+            attachmentType: attachment.attachmentType,
+            contentType: attachment.contentType,
+            sizeBytes: attachment.sizeBytes,
+            fileName: attachment.filename,
+            batchSize: message.attachments.length,
+          },
+          metadata: documentStorageAuditMetadata(persisted),
+          requestContext: requestContext(req),
+        });
+      }
       res.status(201).json({ ok: true, data: message });
     } catch (error) {
       if (error?.code === "LIMIT_FILE_SIZE") {
         return createApiError(res, 413, "FILE_TOO_LARGE", "Ø­Ø¬Ù… ÙØ§ÛŒÙ„ Ø¨ÛŒØ´ Ø§Ø² Ø­Ø¯ Ù…Ø¬Ø§Ø² Ø§Ø³Øª", "file");
+      }
+      if (error?.code === "LIMIT_FILE_COUNT" || error?.code === "LIMIT_UNEXPECTED_FILE") {
+        return createApiError(res, 413, "TOO_MANY_FILES", "You can attach up to five files to one message.", "files");
       }
       handleChatRouteError(res, error, "CHAT_ATTACHMENT_UPLOAD_FAILED", "Could not upload chat attachment.");
     }
@@ -1871,11 +2003,26 @@ async function startServer() {
         },
         requestContext: requestContext(req),
       });
-      const memberIds = await listChatThreadMemberIds(result.before.thread_id, { organizationId: tenantRequest.organizationId });
-      broadcastChat(
-        { type: "message.updated", ok: true, payload: { threadId: result.before.thread_id, messageId: params.messageId, attachment: result.ui } },
-        { organizationId: tenantRequest.organizationId, userIds: memberIds }
-      );
+      const deliveryThreadIds = await listChatMessageDeliveryThreadIds(params.messageId, {
+        organizationId: tenantRequest.organizationId,
+      });
+      for (const deliveryThreadId of deliveryThreadIds) {
+        const memberIds = await listChatThreadMemberIds(deliveryThreadId, {
+          organizationId: tenantRequest.organizationId,
+        });
+        broadcastChat(
+          {
+            type: "message.updated",
+            ok: true,
+            payload: {
+              threadId: deliveryThreadId,
+              messageId: params.messageId,
+              attachment: result.ui,
+            },
+          },
+          { organizationId: tenantRequest.organizationId, userIds: memberIds }
+        );
+      }
       res.json({ ok: true, data: { attachment: result.ui, storageCleanup } });
     } catch (error) {
       handleChatRouteError(res, error, "CHAT_ATTACHMENT_DELETE_FAILED", "Could not delete chat attachment.");
@@ -2138,9 +2285,11 @@ async function startServer() {
         maxAge: "1y",
       })
     );
-    app.use(express.static(distPath, { maxAge: "1h" }));
+    app.use(express.static(distPath, { index: false, maxAge: "1h" }));
     app.get('*', (req, res) => {
-      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
       res.sendFile(path.join(distPath, 'index.html'));
     });
     console.log("Production mode: Serving static files from dist.");
@@ -2170,6 +2319,10 @@ async function startServer() {
           user: auth.user,
           organizationId: auth.organizationId,
           joinedThreads: new Set(),
+          activeThreadId: null,
+          visibilityState: "hidden",
+          hasFocus: false,
+          lastContextAt: 0,
         };
         chatClients.set(ws, clientState);
         sendChatSocket(ws, {
@@ -2205,6 +2358,39 @@ async function startServer() {
           }
 
           try {
+            if (event.type === "client.context") {
+              if (rejectChatSocketTenantScope(ws, event.payload, event.requestId)) return;
+              const payload = parseChatSocketPayload(ws, chatClientContextBodySchema, event.payload, event.requestId);
+              if (!payload) return;
+              const now = Date.now();
+              if (
+                payload.threadId
+                && !(await userCanAccessThread(auth.user.id, payload.threadId, { organizationId: auth.organizationId }))
+              ) {
+                sendChatSocketError(ws, {
+                  requestId: event.requestId,
+                  code: "FORBIDDEN",
+                  message: "Thread access denied.",
+                });
+                return;
+              }
+              clientState.activeThreadId = payload.threadId || null;
+              clientState.visibilityState = payload.visibilityState;
+              clientState.hasFocus = payload.hasFocus;
+              clientState.lastContextAt = now;
+              sendChatSocket(ws, {
+                type: "client.context.updated",
+                ok: true,
+                requestId: event.requestId,
+                payload: {
+                  threadId: clientState.activeThreadId,
+                  visibilityState: clientState.visibilityState,
+                  hasFocus: clientState.hasFocus,
+                },
+              });
+              return;
+            }
+
             if (event.type === "message.send") {
               if (rejectChatSocketTenantScope(ws, event.payload, event.requestId)) return;
               const payload = parseChatSocketPayload(ws, chatMessageSendBodySchema, event.payload, event.requestId);
@@ -2228,36 +2414,25 @@ async function startServer() {
                 });
                 return;
               }
-              const message = await createChatMessage({
+              const created = await createChatMessage({
                 threadId: payload.threadId,
                 sender: auth.user,
                 organizationId: auth.organizationId,
                 body: payload.body,
                 clientMessageId: payload.clientMessageId,
               });
-              const memberIds = await listChatThreadMemberIds(payload.threadId, { organizationId: auth.organizationId });
-              const connectedRecipients = connectedChatUserIds(auth.organizationId, memberIds);
-              const missedRecipientIds = memberIds.filter((userId) => userId !== auth.user.id && !connectedRecipients.has(userId));
-              await createChatMessageNotifications({
-                organizationId: auth.organizationId,
-                threadId: payload.threadId,
-                messageId: message.id,
-                senderId: auth.user.id,
-                senderName: auth.user.name,
-                recipientUserIds: missedRecipientIds,
-              });
+              const message = created.message;
               sendChatSocket(ws, {
                 type: "message.ack",
                 ok: true,
                 requestId: event.requestId,
                 payload: { id: message.id, clientMessageId: payload.clientMessageId },
               });
-              const outgoing = { type: "message.created", ok: true, requestId: event.requestId, payload: message };
-              broadcastChat(outgoing, { organizationId: auth.organizationId, userIds: memberIds });
-              broadcastChat(
-                { type: "thread.updated", payload: { threadId: payload.threadId, lastMessage: message } },
-                { organizationId: auth.organizationId, userIds: memberIds }
-              );
+              await deliverCreatedChatMessage(created, {
+                organizationId: auth.organizationId,
+                sender: auth.user,
+                requestId: event.requestId,
+              });
               return;
             }
 
@@ -2360,6 +2535,7 @@ async function startServer() {
 
   httpServer.listen(PORT, "0.0.0.0", () => {
     startCurrencyRatesWorker(pool);
+    startNotificationWorker(pool);
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }

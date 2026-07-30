@@ -5,6 +5,7 @@ coverage/
 playwright-report/
 test-results/
 .codex-qa-screenshots/
+.codex-run/
 .agents/
 .continue/
 graphify-out/

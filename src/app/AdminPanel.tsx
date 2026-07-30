@@ -11,10 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { EmptyState, EmptyTableRow } from "@/src/components/EmptyState";
 import { AdminPanelSkeleton } from "@/src/components/SkeletonStates";
-import { ActionSkeleton } from "@/components/ui/skeleton";
+import { ActionSkeleton, Skeleton } from "@/components/ui/skeleton";
 import { useAppStore } from "@/src/store/useAppStore";
 
-export type AdminTabKey = "overview" | "organizations" | "subscriptions" | "billing" | "errors";
+export type AdminTabKey = "overview" | "organizations" | "contacts" | "subscriptions" | "billing" | "errors";
 type Organization = {
   id: string;
   name: string;
@@ -27,6 +27,18 @@ type Organization = {
 type Plan = {
   id: string;
   name: string;
+};
+type ContactRequest = {
+  id: string;
+  companyName: string;
+  contactName: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  preferredContactMethod?: "phone" | "email" | "either";
+  message?: string;
+  status: "new" | "resolved";
+  createdAt?: string;
+  resolvedAt?: string | null;
 };
 type AdminOrgUser = {
   id: string;
@@ -84,6 +96,31 @@ function preferredContactMethodLabel(value?: string) {
   if (value === "email") return "ایمیل";
   if (value === "either") return "هر دو";
   return "تماس تلفنی";
+}
+
+function formatDateTime(value?: string) {
+  if (!value) return "ثبت نشده";
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toLocaleString("fa-IR") : "ثبت نشده";
+}
+
+function ContactRequestStatusBadge({ status }: { status: ContactRequest["status"] }) {
+  const resolved = status === "resolved";
+  const Icon = resolved ? CheckCircle2 : BellRing;
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "rounded-lg px-2.5 py-1 text-[11px] font-bold",
+        resolved
+          ? "border-emerald-500/30 bg-emerald-50 text-emerald-700"
+          : "border-amber-500/30 bg-amber-50 text-amber-700"
+      )}
+    >
+      <Icon className="ml-1.5 h-3.5 w-3.5" />
+      {resolved ? "رسیدگی‌شده" : "جدید"}
+    </Badge>
+  );
 }
 
 function StatusBadge({ status }: { status?: string }) {
@@ -264,10 +301,11 @@ function EmptyDashboardState({
 type AdminPanelProps = {
   activeTab?: AdminTabKey;
   onTabChange?: (tab: AdminTabKey) => void;
+  onContactRequestCountChange?: (count: number) => void;
   embedded?: boolean;
 };
 
-export default function AdminPanel({ activeTab, onTabChange, embedded = false }: AdminPanelProps = {}) {
+export default function AdminPanel({ activeTab, onTabChange, onContactRequestCountChange, embedded = false }: AdminPanelProps = {}) {
   const currentUser = useAppStore((state) => state.currentUser);
   const [internalTab, setInternalTab] = React.useState<AdminTabKey>("overview");
   const tab = activeTab || internalTab;
@@ -295,6 +333,10 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
   });
   const [errors, setErrors] = React.useState<any[]>([]);
   const [errorFilter, setErrorFilter] = React.useState("unresolved");
+  const [contactRequests, setContactRequests] = React.useState<ContactRequest[]>([]);
+  const [contactRequestsLoading, setContactRequestsLoading] = React.useState(true);
+  const [contactRequestsError, setContactRequestsError] = React.useState("");
+  const [resolvingContactRequestId, setResolvingContactRequestId] = React.useState("");
   const [platformHealth, setPlatformHealth] = React.useState<PlatformHealthState>({ api: "unknown", db: "unknown" });
   const [limits, setLimits] = React.useState<Record<string, any>>({});
   const [creatingCompany, setCreatingCompany] = React.useState(false);
@@ -338,8 +380,22 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
     });
   }, []);
 
+  const loadContactRequests = React.useCallback(async () => {
+    setContactRequestsLoading(true);
+    setContactRequestsError("");
+    try {
+      const requests = await api<ContactRequest[]>("/api/admin/contact-requests");
+      setContactRequests(requests);
+    } catch (error: any) {
+      setContactRequestsError(error.message || "دریافت درخواست‌های دمو انجام نشد");
+    } finally {
+      setContactRequestsLoading(false);
+    }
+  }, []);
+
   const refresh = React.useCallback(async () => {
     setLoading(true);
+    const contactRequestsPromise = loadContactRequests();
     try {
       const [overviewData, orgData, planData, paymentData, invoiceData, errorData] = await Promise.all([
         api<any>("/api/admin/overview"),
@@ -358,12 +414,13 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
       setErrors(errorData);
       await loadOrganization(selectedOrgId || orgData[0]?.id || "");
       await loadPlatformHealth();
+      await contactRequestsPromise;
     } catch (error: any) {
       toast.error(error.message || "دسترسی به پنل ادمین ممکن نیست");
     } finally {
       setLoading(false);
     }
-  }, [errorFilter, loadOrganization, loadPlatformHealth, selectedOrgId]);
+  }, [errorFilter, loadContactRequests, loadOrganization, loadPlatformHealth, selectedOrgId]);
 
   React.useEffect(() => {
     refresh();
@@ -553,14 +610,45 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
     toast.success("خطا حل‌شده علامت خورد");
   };
 
+  const resolveContactRequest = async (request: ContactRequest) => {
+    if (request.status === "resolved" || resolvingContactRequestId) return;
+    setResolvingContactRequestId(request.id);
+    try {
+      const resolvedRequest = await api<ContactRequest>(`/api/admin/contact-requests/${request.id}/resolve`, { method: "POST" });
+      setContactRequests((items) => items.map((item) => item.id === request.id ? resolvedRequest : item));
+      if (request.status === "new") {
+        setOverview((current: any) => current ? {
+          ...current,
+          pendingContactRequests: Math.max(0, Number(current.pendingContactRequests || 0) - 1),
+        } : current);
+      }
+      toast.success("درخواست دمو رسیدگی‌شده علامت خورد");
+    } catch (error: any) {
+      toast.error(error.message || "تغییر وضعیت درخواست دمو انجام نشد");
+    } finally {
+      setResolvingContactRequestId("");
+    }
+  };
+
+  const loadedNewContactRequestsCount = contactRequests.filter((request) => request.status === "new").length;
+  const newContactRequestsCount = overview?.pendingContactRequests !== undefined && overview?.pendingContactRequests !== null
+    ? Math.max(0, Number(overview.pendingContactRequests) || 0)
+    : loadedNewContactRequestsCount;
+
+  React.useEffect(() => {
+    onContactRequestCountChange?.(newContactRequestsCount);
+  }, [newContactRequestsCount, onContactRequestCountChange]);
+
   const cards = [
     ["مشتریان فعال", overview?.activeTenants, Building2],
+    ["درخواست‌های دمو", newContactRequestsCount, MessageSquareText],
     ["خطاهای باز", overview?.unresolvedErrors, AlertTriangle],
   ];
 
   const tabItems: { key: AdminTabKey; label: string; count?: number }[] = [
     { key: "overview", label: "نمای کلی" },
     { key: "organizations", label: "مشتریان", count: organizations.length },
+    { key: "contacts", label: "درخواست‌های دمو", count: newContactRequestsCount },
     { key: "subscriptions", label: "اشتراک و محدودیت" },
     { key: "billing", label: "صورتحساب و پرداخت" },
     { key: "errors", label: "خطاها", count: overview?.unresolvedErrors },
@@ -569,7 +657,7 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
   const paidPayments = payments.filter((payment) => payment.status === "paid");
   const paidRevenue = Number(overview?.paidRevenueIrr || paidPayments.reduce((sum, payment) => sum + Number(payment.amountIrr || 0), 0));
   const openErrors = Number(overview?.unresolvedErrors ?? errors.filter((error) => !error.resolvedAt).length);
-  const pendingActionsCount = openErrors;
+  const pendingActionsCount = openErrors + newContactRequestsCount;
   const recentOrganizations = [...organizations]
     .sort((a: any, b: any) => safeDateValue(b.createdAt) - safeDateValue(a.createdAt))
     .slice(0, 6);
@@ -582,6 +670,7 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
   const recentActivity = [
     ...payments.map((item) => ({ type: "پرداخت", title: item.organizationName || item.provider, status: item.status, at: item.createdAt || item.paidAt })),
     ...errors.map((item) => ({ type: "خطا", title: item.message, status: item.resolvedAt ? "resolved" : item.source, at: item.createdAt })),
+    ...contactRequests.map((item) => ({ type: "درخواست دمو", title: item.companyName, status: item.status, at: item.createdAt })),
   ].sort((a, b) => safeDateValue(b.at) - safeDateValue(a.at)).slice(0, 8);
   const paymentStatusCounts = payments.reduce((counts: Record<string, number>, payment) => {
     const key = payment.status || "unknown";
@@ -600,6 +689,11 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
       title: "شرکت‌ها و مشتریان SaaS",
       subtitle: "ایجاد دستی شرکت، وضعیت سازمان‌ها، پلن‌ها و دسترسی‌ها",
       icon: Building2,
+    },
+    contacts: {
+      title: "درخواست‌های دمو",
+      subtitle: "پیگیری درخواست‌های ورودی سایت و ثبت وضعیت رسیدگی",
+      icon: MessageSquareText,
     },
     subscriptions: {
       title: "اشتراک، محدودیت و کاربران سازمان",
@@ -719,6 +813,7 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
                       <UserPlus className="ml-2 h-4 w-4" />
                       شرکت جدید
                     </Button>
+                    <Button variant="outline" className="rounded-xl text-xs font-bold" onClick={() => setTab("contacts")}>درخواست‌های دمو</Button>
                     <Button variant="outline" className="rounded-xl text-xs font-bold" onClick={() => setTab("errors")}>مشاهده خطاها</Button>
                     <Button asChild variant="outline" className="rounded-xl text-xs font-bold">
                       <a href="/dashboard">بازگشت به اپ</a>
@@ -737,10 +832,10 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
                   </div>
                   <h2 className="text-2xl font-black tracking-tight md:text-3xl">امروز {numberFa(pendingActionsCount)} مورد نیازمند توجه دارید</h2>
                   <p className="mt-3 max-w-2xl text-sm leading-7 text-muted-foreground">
-                    درخواست‌های ثبت‌نام، تماس، پرداخت‌های نیازمند بررسی و خطاهای باز از همین‌جا قابل پایش هستند.
+                    درخواست‌های دمو، پرداخت‌های نیازمند بررسی و خطاهای باز از همین‌جا قابل پایش هستند.
                   </p>
                   <div className="mt-5 flex flex-wrap gap-2">
-                    <Button className="rounded-xl font-bold" onClick={() => setTab("organizations")}>
+                    <Button className="rounded-xl font-bold" onClick={() => setTab(newContactRequestsCount ? "contacts" : openErrors ? "errors" : "organizations")}>
                       شروع بررسی
                       <ArrowUpLeft className="mr-2 h-4 w-4" />
                     </Button>
@@ -774,7 +869,7 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
               <DashboardKpiCard icon={Building2} label="مشتریان فعال" value={numberFa(activeOrganizations.length)} description={`از ${numberFa(organizations.length)} سازمان ثبت‌شده`} accent="bg-blue-50 text-blue-700" statusText="SaaS" />
               <DashboardKpiCard icon={CircleDollarSign} label="درآمد تاییدشده" value={money(paidRevenue)} description={`${numberFa(paidPayments.length)} پرداخت تاییدشده`} accent="bg-emerald-50 text-emerald-700" statusText="Paid" />
               <DashboardKpiCard icon={FileWarning} label="خطاهای باز" value={numberFa(openErrors)} description="موارد حل‌نشده یا اخیر" accent="bg-rose-50 text-rose-700" statusText={openErrors ? "Alert" : "OK"} />
-              <DashboardKpiCard icon={Users} label="سازمان‌های فعال" value={numberFa(activeOrganizations.length)} description="وضعیت active در لیست سازمان‌ها" accent="bg-slate-100 text-slate-700" statusText="Org" />
+              <DashboardKpiCard icon={MessageSquareText} label="درخواست‌های دمو" value={numberFa(newContactRequestsCount)} description="درخواست‌های جدید و نیازمند پیگیری" accent="bg-amber-50 text-amber-700" statusText={newContactRequestsCount ? "New" : "Done"} />
             </section>
 
             <section className="grid gap-5 xl:grid-cols-[1.35fr_0.65fr]">
@@ -1003,6 +1098,181 @@ export default function AdminPanel({ activeTab, onTabChange, embedded = false }:
               </table>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {tab === "contacts" && !loading && (
+        <div data-testid="admin-section-contacts" className="space-y-4">
+          <Card className="rounded-2xl border-border/80 bg-card shadow-sm">
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-black">صندوق درخواست‌های دمو</p>
+                <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                  درخواست‌های ثبت‌شده در سایت را بررسی کنید و پس از پیگیری، وضعیت آنها را تغییر دهید.
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <Badge variant="outline" className="rounded-lg border-amber-500/30 bg-amber-50 px-2.5 py-1 text-amber-700">
+                  {numberFa(newContactRequestsCount)} درخواست جدید
+                </Badge>
+                <Badge variant="outline" className="rounded-lg px-2.5 py-1">
+                  {numberFa(contactRequests.length)} درخواست کل
+                </Badge>
+              </div>
+            </CardContent>
+          </Card>
+
+          {contactRequestsLoading ? (
+            <div className="grid gap-4 xl:grid-cols-2" role="status" aria-label="در حال دریافت درخواست‌های دمو">
+              {[0, 1, 2, 3].map((item) => (
+                <Card key={item} className="rounded-2xl border-border/80 shadow-sm">
+                  <CardContent className="space-y-4 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-2">
+                        <Skeleton className="h-5 w-40" />
+                        <Skeleton className="h-4 w-28" />
+                      </div>
+                      <Skeleton className="h-7 w-20" />
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Skeleton className="h-16 w-full" />
+                      <Skeleton className="h-16 w-full" />
+                    </div>
+                    <Skeleton className="h-20 w-full" />
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : contactRequestsError ? (
+            <Card className="rounded-2xl border-red-200 bg-red-50/60 shadow-sm" role="alert">
+              <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-100 text-red-700">
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-black text-red-900">دریافت درخواست‌های دمو انجام نشد</p>
+                    <p className="mt-1 break-words text-xs leading-6 text-red-700">{contactRequestsError}</p>
+                  </div>
+                </div>
+                <Button type="button" variant="outline" className="rounded-xl border-red-200 bg-background text-xs font-bold" onClick={loadContactRequests}>
+                  تلاش دوباره
+                </Button>
+              </CardContent>
+            </Card>
+          ) : contactRequests.length === 0 ? (
+            <Card className="rounded-2xl border-border/80 shadow-sm">
+              <CardContent className="p-4">
+                <EmptyState
+                  icon={MessageSquareText}
+                  title="هنوز درخواست دمویی ثبت نشده"
+                  description="پس از ارسال فرم دمو در سایت، اطلاعات تماس و پیام متقاضی اینجا نمایش داده می‌شود."
+                  compact
+                />
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+              {contactRequests.map((request) => {
+                const isResolving = resolvingContactRequestId === request.id;
+                return (
+                  <Card
+                    key={request.id}
+                    className={cn(
+                      "min-w-0 overflow-hidden rounded-2xl border-border/80 bg-card shadow-sm",
+                      request.status === "new" && "border-amber-300/80"
+                    )}
+                  >
+                    <CardHeader className="p-4 pb-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <CardTitle className="break-words text-base font-black">{request.companyName || "شرکت بدون نام"}</CardTitle>
+                          <p className="mt-1 break-words text-xs font-bold text-muted-foreground">{request.contactName || "نام مخاطب ثبت نشده"}</p>
+                        </div>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+                          <ContactRequestStatusBadge status={request.status} />
+                          <span className="text-[11px] font-bold text-muted-foreground">{formatDateTime(request.createdAt)}</span>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4 p-4 pt-0">
+                      <dl className="grid min-w-0 gap-3 sm:grid-cols-2">
+                        <div className="min-w-0 rounded-xl bg-muted/45 p-3">
+                          <dt className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground">
+                            <PhoneCall className="h-3.5 w-3.5" />
+                            تلفن
+                          </dt>
+                          <dd className="mt-1.5 min-w-0 text-sm font-bold" dir="ltr">
+                            {request.contactPhone ? (
+                              <a className="block break-all text-primary underline-offset-4 hover:underline" href={`tel:${request.contactPhone}`}>
+                                {request.contactPhone}
+                              </a>
+                            ) : "ثبت نشده"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 rounded-xl bg-muted/45 p-3">
+                          <dt className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground">
+                            <Mail className="h-3.5 w-3.5" />
+                            ایمیل
+                          </dt>
+                          <dd className="mt-1.5 min-w-0 text-sm font-bold" dir="ltr">
+                            {request.contactEmail ? (
+                              <a className="block break-all text-primary underline-offset-4 hover:underline" href={`mailto:${request.contactEmail}`}>
+                                {request.contactEmail}
+                              </a>
+                            ) : "ثبت نشده"}
+                          </dd>
+                        </div>
+                        <div className="min-w-0 rounded-xl bg-muted/45 p-3 sm:col-span-2">
+                          <dt className="text-[11px] font-black text-muted-foreground">روش تماس ترجیحی</dt>
+                          <dd className="mt-1.5 text-sm font-bold">{preferredContactMethodLabel(request.preferredContactMethod)}</dd>
+                        </div>
+                      </dl>
+
+                      <div className="min-w-0 rounded-xl border border-border/80 p-3">
+                        <div className="flex items-center gap-1.5 text-[11px] font-black text-muted-foreground">
+                          <MessageSquareText className="h-3.5 w-3.5" />
+                          پیام
+                        </div>
+                        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-7">
+                          {request.message || "پیامی ثبت نشده است."}
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end border-t border-border/70 pt-3">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={request.status === "resolved" ? "outline" : "default"}
+                          className="w-full rounded-xl text-xs font-bold sm:w-auto"
+                          disabled={request.status === "resolved" || Boolean(resolvingContactRequestId)}
+                          aria-busy={isResolving}
+                          onClick={() => resolveContactRequest(request)}
+                        >
+                          {isResolving ? (
+                            <>
+                              <Activity className="ml-2 h-4 w-4 animate-spin motion-reduce:animate-none" />
+                              در حال ثبت...
+                            </>
+                          ) : request.status === "resolved" ? (
+                            <>
+                              <CheckCircle2 className="ml-2 h-4 w-4" />
+                              رسیدگی شده
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="ml-2 h-4 w-4" />
+                              علامت‌گذاری به‌عنوان رسیدگی‌شده
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

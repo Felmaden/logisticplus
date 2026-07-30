@@ -6,6 +6,7 @@ import {
   expectUnavailable,
   loginApi,
   loginViaUi,
+  nextValidShipmentCode,
   readOk,
   uniqueEmail,
 } from "./helpers";
@@ -109,6 +110,7 @@ async function insertChatHistory(
 test.describe.serial("secure company chat", () => {
   let client: DbClient;
   const threadIds = new Set<string>();
+  const shipmentIds = new Set<string>();
 
   test.beforeAll(async () => {
     client = new Client({ connectionString: testDatabaseUrl });
@@ -118,6 +120,9 @@ test.describe.serial("secure company chat", () => {
   test.afterAll(async () => {
     if (threadIds.size) {
       await client.query("DELETE FROM chat_threads WHERE id = ANY($1::text[])", [[...threadIds]]);
+    }
+    if (shipmentIds.size) {
+      await client.query("DELETE FROM shipments WHERE id = ANY($1::text[])", [[...shipmentIds]]);
     }
     await client.end();
   });
@@ -668,7 +673,8 @@ test.describe.serial("secure company chat", () => {
       await expect(page.getByTestId("chat-selected-attachment")).toContainText("05:00");
       await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.trackStops)).toBe(3);
       const revokedBeforeThreadChange = await page.evaluate(() => (window as any).__chatVoiceTestState.revokedUrls.length);
-      await page.getByTestId("chat-category-group").click();
+      await page.getByTestId("chat-category-all").click();
+      await page.getByTestId("chat-thread-item").first().click();
       await expect.poll(() => page.evaluate(() => (window as any).__chatVoiceTestState.revokedUrls.length)).toBeGreaterThan(revokedBeforeThreadChange);
       await page.getByTestId("chat-category-dm").click();
       await page.getByTestId("chat-thread-item").first().click();
@@ -691,6 +697,219 @@ test.describe.serial("secure company chat", () => {
       await page.getByTestId("chat-voice-button").click();
       await expect(page.getByTestId("chat-error")).toContainText("پشتیبانی نمی‌کند");
       await expect(page.getByTestId("chat-message-input")).toBeEnabled();
+    } finally {
+      await disposeContexts(owner);
+    }
+  });
+
+  test("bridges group text and attachments to shipment chats, switches atomically, and stops future delivery", async () => {
+    const owner = await loginApi();
+    const ownerAuth = await readOk<any>(await owner.get("/api/auth/me"));
+    const employee = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-bridge-member");
+    const employeeApi = await loginApi(employee.email, USER_PASSWORD);
+    const firstShipmentId = `e2e-bridge-shipment-${Date.now()}-a`;
+    const secondShipmentId = `e2e-bridge-shipment-${Date.now()}-b`;
+    const firstCode = await nextValidShipmentCode();
+    await client.query(
+      `INSERT INTO shipments (
+         id, organization_id, owner_user_id, shipment_code, customer_name, status, origin, destination, created_by_id
+       )
+       VALUES ($1, $2, $3, $4, 'Bridge Customer A', 'IN_TRANSIT', 'Tehran', 'Bandar Abbas', $3)`,
+      [firstShipmentId, ownerAuth.user.organizationId, ownerAuth.user.id, firstCode]
+    );
+    shipmentIds.add(firstShipmentId);
+    const secondCode = await nextValidShipmentCode();
+    await client.query(
+      `INSERT INTO shipments (
+         id, organization_id, owner_user_id, shipment_code, customer_name, status, origin, destination, created_by_id
+       )
+       VALUES ($1, $2, $3, $4, 'Bridge Customer B', 'ARRIVED', 'Shiraz', 'Tehran', $3)`,
+      [secondShipmentId, ownerAuth.user.organizationId, ownerAuth.user.id, secondCode]
+    );
+    shipmentIds.add(secondShipmentId);
+
+    try {
+      const options = await readOk<any[]>(await owner.get(`/api/chat/shipment-options?q=${firstCode.slice(0, 8)}`));
+      expect(options.some((option) => option.id === firstShipmentId && option.code === firstCode)).toBe(true);
+      expect(JSON.stringify(options)).not.toContain("organization_id");
+
+      const group = await readOk<{ id: string }>(await owner.post("/api/chat/threads", {
+        data: {
+          type: "GROUP",
+          name: `E2E shipment bridge ${Date.now()}`,
+          participantUserIds: [employee.id],
+        },
+      }));
+      threadIds.add(group.id);
+
+      const multipleTags = await employeeApi.post(`/api/chat/threads/${encodeURIComponent(group.id)}/messages`, {
+        data: { body: `invalid @${firstCode} @${secondCode}` },
+      });
+      expect(multipleTags.status()).toBe(400);
+      expect((await multipleTags.json()).error?.code).toBe("CHAT_SHIPMENT_TAG_MULTIPLE");
+
+      const activation = await readOk<any>(await owner.post(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/messages`,
+        { data: { body: `شروع پیگیری @${firstCode}` } }
+      ));
+      expect(activation.originThreadId).toBe(group.id);
+      expect(activation.forwardedTo?.shipmentId).toBe(firstShipmentId);
+      expect(activation.shipmentMentions?.[0]?.shipmentCode).toBe(firstCode);
+      const firstShipmentThreadId = activation.forwardedTo.threadId;
+      threadIds.add(firstShipmentThreadId);
+
+      const activeGroup = (await readOk<any[]>(await owner.get("/api/chat/threads")))
+        .find((thread) => thread.id === group.id);
+      expect(activeGroup.activeShipmentBridge?.shipmentCode).toBe(firstCode);
+      expect(activeGroup.activeShipmentBridge?.canOpenShipment).toBe(true);
+
+      const forwardedText = await readOk<any>(await owner.post(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/messages`,
+        { data: { body: "متن بعد از فعال‌سازی" } }
+      ));
+      expect(forwardedText.forwardedTo?.threadId).toBe(firstShipmentThreadId);
+
+      const forwardedFileMessage = await readOk<any>(await uploadChatAttachment(
+        owner,
+        group.id,
+        { name: "bridged-note.txt", mimeType: "text/plain", buffer: Buffer.from("bridged attachment body") },
+        "فایل پل‌شده"
+      ));
+      expect(forwardedFileMessage.forwardedTo?.threadId).toBe(firstShipmentThreadId);
+      const forwardedAttachment = forwardedFileMessage.attachments[0];
+
+      const firstShipmentMessages = await readOk<any[]>(
+        await owner.get(`/api/chat/threads/${encodeURIComponent(firstShipmentThreadId)}/messages`)
+      );
+      const destinationActivation = firstShipmentMessages.find((message) => message.id === activation.id);
+      expect(destinationActivation.forwardedFrom?.threadId).toBe(group.id);
+      expect(destinationActivation.threadId).toBe(firstShipmentThreadId);
+      expect(firstShipmentMessages.find((message) => message.id === forwardedFileMessage.id)?.attachments).toHaveLength(1);
+      expect((await owner.get(forwardedAttachment.downloadUrl)).status()).toBe(200);
+
+      await readOk(await employeeApi.post(`/api/chat/threads/${encodeURIComponent(group.id)}/read`, {
+        data: { messageId: activation.id },
+      }));
+      const groupAfterRead = await readOk<any[]>(
+        await owner.get(`/api/chat/threads/${encodeURIComponent(group.id)}/messages`)
+      );
+      expect(groupAfterRead.find((message) => message.id === activation.id)?.seenBy
+        .some((reader: any) => reader.userId === employee.id)).toBe(true);
+
+      const switched = await readOk<any>(await owner.post(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/messages`,
+        { data: { body: `تغییر محموله @${secondCode}` } }
+      ));
+      const secondShipmentThreadId = switched.forwardedTo.threadId;
+      threadIds.add(secondShipmentThreadId);
+      expect(switched.forwardedTo?.shipmentId).toBe(secondShipmentId);
+
+      const afterSwitchBody = `after switch ${Date.now()}`;
+      await readOk<any>(await owner.post(`/api/chat/threads/${encodeURIComponent(group.id)}/messages`, {
+        data: { body: afterSwitchBody },
+      }));
+      expect((await readOk<any[]>(await owner.get(
+        `/api/chat/threads/${encodeURIComponent(firstShipmentThreadId)}/messages`
+      ))).some((message) => message.body === afterSwitchBody)).toBe(false);
+      expect((await readOk<any[]>(await owner.get(
+        `/api/chat/threads/${encodeURIComponent(secondShipmentThreadId)}/messages`
+      ))).some((message) => message.body === afterSwitchBody)).toBe(true);
+
+      const reverseBody = `shipment only reply ${Date.now()}`;
+      await readOk<any>(await owner.post(`/api/chat/threads/${encodeURIComponent(secondShipmentThreadId)}/messages`, {
+        data: { body: reverseBody },
+      }));
+      expect((await readOk<any[]>(await owner.get(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/messages`
+      ))).some((message) => message.body === reverseBody)).toBe(false);
+
+      const stopped = await readOk<any>(await employeeApi.delete(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/shipment-bridge`
+      ));
+      expect(stopped.stopped).toBe(true);
+      const afterStopBody = `after stop ${Date.now()}`;
+      await readOk<any>(await employeeApi.post(`/api/chat/threads/${encodeURIComponent(group.id)}/messages`, {
+        data: { body: afterStopBody },
+      }));
+      expect((await readOk<any[]>(await owner.get(
+        `/api/chat/threads/${encodeURIComponent(secondShipmentThreadId)}/messages`
+      ))).some((message) => message.body === afterStopBody)).toBe(false);
+      expect((await readOk<any[]>(await owner.get(
+        `/api/chat/threads/${encodeURIComponent(group.id)}/messages`
+      ))).some((message) => message.id === activation.id)).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 5_100));
+    } finally {
+      await disposeContexts(owner, employeeApi);
+    }
+  });
+
+  test("queues dragged files, preserves the queue on invalid input, removes items, and sends one batch message", async ({ page }) => {
+    const owner = await loginApi();
+    const employee = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-multifile");
+    const thread = await readOk<{ id: string }>(
+      await owner.post("/api/chat/direct", { data: { userId: employee.id } })
+    );
+    threadIds.add(thread.id);
+
+    try {
+      await loginViaUi(page);
+      await page.goto(`/chat?threadId=${encodeURIComponent(thread.id)}`);
+      await expect(page.getByTestId("chat-composer")).toBeVisible();
+      const pngBase64 = tinyPng.toString("base64");
+      await page.evaluate(({ pngBase64 }) => {
+        const bytes = Uint8Array.from(atob(pngBase64), (character) => character.charCodeAt(0));
+        const transfer = new DataTransfer();
+        transfer.items.add(new File([bytes], "drag-image.png", { type: "image/png" }));
+        transfer.items.add(new File(["dragged note"], "drag-note.txt", { type: "text/plain" }));
+        (window as any).__chatDropTransfer = transfer;
+        const conversation = document.querySelector('[data-testid="chat-conversation"]') as HTMLElement;
+        conversation.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
+      }, { pngBase64 });
+      await expect(page.getByTestId("chat-drop-overlay")).toBeVisible();
+      await page.evaluate(() => {
+        const transfer = (window as any).__chatDropTransfer as DataTransfer;
+        const conversation = document.querySelector('[data-testid="chat-conversation"]') as HTMLElement;
+        conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+      });
+      await expect(page.getByTestId("chat-selected-attachment")).toHaveCount(2);
+
+      await page.evaluate(() => {
+        const transfer = new DataTransfer();
+        transfer.items.add(new File(["blocked"], "unsafe.exe", { type: "application/octet-stream" }));
+        const conversation = document.querySelector('[data-testid="chat-conversation"]') as HTMLElement;
+        conversation.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+      });
+      await expect(page.getByTestId("chat-error")).toContainText("فرمت فایل مجاز نیست");
+      await expect(page.getByTestId("chat-selected-attachment")).toHaveCount(2);
+
+      await page.getByTestId("chat-selected-attachment").first().getByRole("button").click();
+      await expect(page.getByTestId("chat-selected-attachment")).toHaveCount(1);
+      await page.getByTestId("chat-attachment-input").setInputFiles({
+        name: "replacement.png",
+        mimeType: "image/png",
+        buffer: tinyPng,
+      });
+      await expect(page.getByTestId("chat-selected-attachment")).toHaveCount(2);
+
+      const caption = `multi attachment ${Date.now()}`;
+      await page.getByTestId("chat-message-input").fill(caption);
+      await page.getByTestId("chat-send-button").click();
+      const sentBubble = page.getByTestId("chat-message-bubble").filter({ hasText: caption });
+      await expect(sentBubble).toBeVisible();
+      await expect(sentBubble.getByTestId("chat-message-attachments").locator(":scope > *")).toHaveCount(2);
+      await expect(page.getByTestId("chat-selected-attachment")).toHaveCount(0);
+
+      const stored = await client.query(
+        `SELECT message.id, COUNT(attachment.id)::int AS attachment_count
+         FROM chat_messages message
+         JOIN chat_message_attachments attachment ON attachment.message_id = message.id
+         WHERE message.thread_id = $1
+           AND message.body = $2
+         GROUP BY message.id`,
+        [thread.id, caption]
+      );
+      expect(stored.rows).toHaveLength(1);
+      expect(stored.rows[0].attachment_count).toBe(2);
     } finally {
       await disposeContexts(owner);
     }
@@ -740,11 +959,17 @@ test.describe.serial("secure company chat", () => {
       await loginViaUi(page);
       await page.goto(`/chat?threadId=${encodeURIComponent(first.id)}`);
       await expect(page.getByTestId("chat-category-tabs")).toBeVisible();
-      await expect(page.getByTestId("chat-category-tabs").locator("button")).toHaveCount(3);
+      await expect(page.getByTestId("chat-category-tabs").locator("button")).toHaveCount(5);
       const categoryOrder = await page.getByTestId("chat-category-tabs").locator("button").evaluateAll((buttons) =>
         buttons.map((button) => button.getAttribute("data-testid"))
       );
-      expect(categoryOrder).toEqual(["chat-category-dm", "chat-category-group", "chat-category-shipment"]);
+      expect(categoryOrder).toEqual([
+        "chat-category-all",
+        "chat-category-unread",
+        "chat-category-dm",
+        "chat-category-group",
+        "chat-category-shipment",
+      ]);
       await expect(page.getByTestId("chat-thread-shipment-badge").first()).toBeVisible();
       await expect(page.getByTestId("chat-message-bubble").filter({ hasText: body })).toBeVisible();
       await page.getByTestId("chat-open-shipment").click();
@@ -810,6 +1035,78 @@ test.describe.serial("secure company chat", () => {
     const bubble = page.getByTestId("chat-message-bubble").filter({ hasText: socketText });
     await expect(bubble).toBeVisible();
     await expect(page.locator("img[src='x']")).toHaveCount(0);
+  });
+
+  test("suppresses only the focused exact thread and exposes unread messenger context elsewhere", async ({ page }) => {
+    const sentSocketFrames: string[] = [];
+    const receivedSocketFrames: string[] = [];
+    page.on("websocket", (socket) => {
+      socket.on("framesent", (event) => sentSocketFrames.push(String(event.payload)));
+      socket.on("framereceived", (event) => receivedSocketFrames.push(String(event.payload)));
+    });
+    const owner = await loginApi();
+    const employee = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-context");
+    const coworker = await createCompanyUser(owner, "OPERATIONS", "e2e-chat-context-peer");
+    const employeeApi = await loginApi(employee.email, USER_PASSWORD);
+    const first = await readOk<{ id: string }>(
+      await owner.post("/api/chat/direct", { data: { userId: employee.id } })
+    );
+    const second = await readOk<{ id: string }>(
+      await employeeApi.post("/api/chat/direct", { data: { userId: coworker.id } })
+    );
+    threadIds.add(first.id);
+    threadIds.add(second.id);
+    const messageIds: string[] = [];
+
+    try {
+      await loginViaUi(page, employee.email, USER_PASSWORD);
+      await page.goto(`/chat?threadId=${encodeURIComponent(first.id)}`);
+      await expect(page.getByTestId("chat-message-input")).toBeVisible();
+      await expect.poll(() => sentSocketFrames.some((frame) => frame.includes("client.context")), {
+        message: JSON.stringify({ sentSocketFrames, receivedSocketFrames }),
+      }).toBe(true);
+      await expect(page.getByTestId("chat-page")).toHaveAttribute("data-active-context-ready", "true");
+
+      const viewed = await readOk<any>(
+        await owner.post(`/api/chat/threads/${encodeURIComponent(first.id)}/messages`, {
+          data: { body: `focused context ${Date.now()}` },
+        })
+      );
+      messageIds.push(viewed.id);
+      await expect(page.getByTestId("chat-message-bubble").filter({ hasText: viewed.body })).toBeVisible();
+      const focusedNotification = await client.query(
+        "SELECT id FROM notifications WHERE user_id = $1 AND source_type = 'CHAT' AND source_id = $2",
+        [employee.id, viewed.id]
+      );
+      expect(focusedNotification.rowCount).toBe(0);
+
+      await page.goto(`/chat?threadId=${encodeURIComponent(second.id)}`);
+      await expect(page.getByTestId("chat-message-input")).toBeVisible();
+      await expect(page.getByTestId("chat-page")).toHaveAttribute("data-active-context-ready", "true");
+      const elsewhere = await readOk<any>(
+        await owner.post(`/api/chat/threads/${encodeURIComponent(first.id)}/messages`, {
+          data: { body: `other thread context ${Date.now()}` },
+        })
+      );
+      messageIds.push(elsewhere.id);
+      await expect.poll(async () => {
+        const result = await client.query(
+          "SELECT COUNT(*)::int AS count FROM notifications WHERE user_id = $1 AND source_type = 'CHAT' AND source_id = $2",
+          [employee.id, elsewhere.id]
+        );
+        return result.rows[0]?.count;
+      }).toBe(1);
+
+      await page.getByTestId("chat-category-unread").click();
+      await expect(page.getByTestId("chat-thread-item").filter({ hasText: elsewhere.body })).toBeVisible();
+      await page.getByTestId("chat-thread-item").filter({ hasText: elsewhere.body }).click();
+      await expect(page.getByTestId("chat-unread-divider")).toBeVisible();
+    } finally {
+      if (messageIds.length) {
+        await client.query("DELETE FROM notifications WHERE source_id = ANY($1::text[])", [messageIds]);
+      }
+      await disposeContexts(owner, employeeApi);
+    }
   });
 
   test("rate limits REST chat sends before insert and validates plain text length", async () => {
@@ -1133,11 +1430,17 @@ test.describe.serial("secure company chat", () => {
         })
       );
       await expect(page.getByTestId("chat-message-bubble").filter({ hasText: incomingBody })).toBeVisible();
+      await expect(page.getByTestId("chat-jump-to-latest")).toBeVisible();
       const afterIncomingScrollTop = await page.evaluate(() => {
         const list = document.querySelector('[data-testid="chat-message-list"]') as HTMLElement;
         return list.scrollTop;
       });
       expect(Math.abs(afterIncomingScrollTop - readingScrollTop)).toBeLessThanOrEqual(8);
+      await page.getByTestId("chat-jump-to-latest").click();
+      await expect.poll(async () => page.evaluate(() => {
+        const list = document.querySelector('[data-testid="chat-message-list"]') as HTMLElement;
+        return Math.round(list.scrollHeight - list.scrollTop - list.clientHeight);
+      })).toBeLessThanOrEqual(8);
     } finally {
       await disposeContexts(owner, employeeApi);
     }
@@ -1189,6 +1492,7 @@ test.describe.serial("secure company chat", () => {
           composerBottom: composer.getBoundingClientRect().bottom,
           headerTop: header.getBoundingClientRect().top,
           viewportHeight: window.innerHeight,
+          direction: getComputedStyle(document.querySelector('[data-testid="chat-page"]') as HTMLElement).direction,
         };
       });
       expect(metrics.bodyOverflowX).toBeLessThanOrEqual(1);
@@ -1197,31 +1501,46 @@ test.describe.serial("secure company chat", () => {
       expect(metrics.headerTop).toBeGreaterThanOrEqual(0);
       expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
 
-      await page.setViewportSize({ width: 390, height: 844 });
-      await page.goto(`/chat?threadId=${encodeURIComponent(thread.id)}`);
-      await expect(page.getByTestId("chat-thread-list")).toBeVisible();
-      await page.getByTestId("chat-thread-item").first().click();
-      await expect(page.getByTestId("chat-message-input")).toBeVisible();
-      metrics = await page.evaluate(() => {
-        const main = document.querySelector("main") as HTMLElement;
-        const list = document.querySelector('[data-testid="chat-message-list"]') as HTMLElement;
-        const composer = document.querySelector('[data-testid="chat-composer"]') as HTMLElement;
-        return {
-          bodyOverflowX: document.body.scrollWidth - document.documentElement.clientWidth,
-          mainOverflowY: main.scrollHeight - main.clientHeight,
-          listScrollable: list.scrollHeight > list.clientHeight,
-          composerBottom: composer.getBoundingClientRect().bottom,
-          viewportHeight: window.innerHeight,
-          headerTop: (document.querySelector('[data-testid="chat-conversation"] header') as HTMLElement).getBoundingClientRect().top,
-        };
-      });
-      expect(metrics.bodyOverflowX).toBeLessThanOrEqual(1);
-      expect(metrics.mainOverflowY).toBeLessThanOrEqual(2);
-      expect(metrics.listScrollable).toBe(true);
-      expect(metrics.headerTop).toBeGreaterThanOrEqual(0);
-      expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
-      await page.getByTestId("chat-mobile-back-button").click();
-      await expect(page.getByTestId("chat-thread-list")).toBeVisible();
+      for (const viewport of [
+        { width: 1024, height: 800 },
+        { width: 768, height: 900 },
+        { width: 375, height: 812 },
+      ]) {
+        await page.setViewportSize(viewport);
+        await page.goto(`/chat?threadId=${encodeURIComponent(thread.id)}`);
+        if (viewport.width < 1024) {
+          await expect(page.getByTestId("chat-thread-list")).toBeVisible();
+          await page.getByTestId("chat-thread-item").first().click();
+        }
+        await expect(page.getByTestId("chat-message-input")).toBeVisible();
+        if (viewport.width === 768) {
+          await page.evaluate(() => document.documentElement.classList.add("dark"));
+        }
+        metrics = await page.evaluate(() => {
+          const main = document.querySelector("main") as HTMLElement;
+          const list = document.querySelector('[data-testid="chat-message-list"]') as HTMLElement;
+          const composer = document.querySelector('[data-testid="chat-composer"]') as HTMLElement;
+          return {
+            bodyOverflowX: document.body.scrollWidth - document.documentElement.clientWidth,
+            mainOverflowY: main.scrollHeight - main.clientHeight,
+            listScrollable: list.scrollHeight > list.clientHeight,
+            composerBottom: composer.getBoundingClientRect().bottom,
+            viewportHeight: window.innerHeight,
+            headerTop: (document.querySelector('[data-testid="chat-conversation"] header') as HTMLElement).getBoundingClientRect().top,
+            direction: getComputedStyle(document.querySelector('[data-testid="chat-page"]') as HTMLElement).direction,
+          };
+        });
+        expect(metrics.bodyOverflowX).toBeLessThanOrEqual(1);
+        expect(metrics.mainOverflowY).toBeLessThanOrEqual(2);
+        expect(metrics.listScrollable).toBe(true);
+        expect(metrics.headerTop).toBeGreaterThanOrEqual(0);
+        expect(metrics.composerBottom).toBeLessThanOrEqual(metrics.viewportHeight + 1);
+        expect(metrics.direction).toBe("rtl");
+        if (viewport.width < 1024) {
+          await page.getByTestId("chat-mobile-back-button").click();
+          await expect(page.getByTestId("chat-thread-list")).toBeVisible();
+        }
+      }
     } finally {
       await disposeContexts(owner);
     }

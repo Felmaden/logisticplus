@@ -530,7 +530,7 @@ test.describe.serial("UX/UI regression sweep", () => {
     const protectedRoutes = ["/dashboard", "/daily-status", "/shipments", "/customers", "/tasks", "/documents", "/commercial-cards", "/archive", "/management"];
     const viewports = [
       { width: 1280, height: 800 },
-      { width: 390, height: 844 },
+      { width: 375, height: 812 },
     ];
 
     for (const viewport of viewports) {

@@ -84,6 +84,9 @@ export const RBAC_TENANT_POLICY: RoutePolicy[] = [
   { family: "chat", method: "POST", path: "/api/chat/threads/:id/participants", auth: "required", permission: "chat.manage_groups", tenantScope: "own-organization" },
   { family: "chat", method: "DELETE", path: "/api/chat/threads/:id/participants/:userId", auth: "required", permission: "chat.manage_groups", tenantScope: "own-organization" },
   { family: "platform-admin", method: "GET", path: "/api/admin/overview", auth: "required", permission: "platform.admin", tenantScope: "platform-global" },
+  { family: "platform-admin", method: "GET", path: "/api/admin/contact-requests", auth: "required", permission: "platform.admin", tenantScope: "platform-global" },
+  { family: "platform-admin", method: "POST", path: "/api/admin/contact-requests/:id/resolve", auth: "required", permission: "platform.admin", tenantScope: "platform-global" },
+  { family: "public-contact", method: "POST", path: "/api/contact-requests", auth: "public", permission: null, tenantScope: "public-safe" },
   { family: "platform-admin", method: "GET", path: "/api/admin/audit-logs", auth: "required", permission: "platform.admin", tenantScope: "platform-global" },
   { family: "public-tracking", method: "GET", path: "/api/public/track/:token", auth: "public", permission: null, tenantScope: "public-safe" },
 ];

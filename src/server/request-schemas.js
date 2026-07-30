@@ -477,11 +477,34 @@ export const notificationListQuerySchema = z.object({
   limit: queryLimit(50),
 });
 
+export const pushSubscriptionBodySchema = z.object({
+  endpoint: z.string().trim().url().max(2048).refine(
+    (value) => value.startsWith("https://"),
+    "Push subscription endpoint must use HTTPS."
+  ),
+  expirationTime: z.number().nonnegative().nullable().optional(),
+  keys: z.object({
+    p256dh: z.string().trim().min(20).max(512),
+    auth: z.string().trim().min(8).max(256),
+  }).strict(),
+}).strict();
+
+export const pushSubscriptionDeleteBodySchema = z.object({
+  endpoint: z.string().trim().url().max(2048).refine(
+    (value) => value.startsWith("https://"),
+    "Push subscription endpoint must use HTTPS."
+  ),
+}).strict();
+
 const chatMessageBody = z.string().trim().min(1, "Message cannot be empty.").max(3000, "Message is too long.");
 
 export const chatParticipantsQuerySchema = z.object({
   q: z.preprocess(firstQueryValue, optionalTrimmedText(120)),
   limit: queryLimit(100),
+}).strict();
+
+export const chatShipmentOptionsQuerySchema = z.object({
+  q: z.preprocess(firstQueryValue, optionalTrimmedText(80)),
 }).strict();
 
 export const chatThreadParamsSchema = z.object({
@@ -546,6 +569,12 @@ export const chatParticipantBodySchema = z.object({
 
 export const chatTypingBodySchema = z.object({
   threadId: requiredId,
+}).strict();
+
+export const chatClientContextBodySchema = z.object({
+  threadId: requiredId.nullable().optional(),
+  visibilityState: z.enum(["visible", "hidden"]),
+  hasFocus: z.boolean(),
 }).strict();
 
 const appUserRole = z.enum(["CEO", "MANAGER", "OPERATIONS", "CUSTOMER_SERVICE", "FINANCE"]);

@@ -117,19 +117,23 @@ async function checkPublicPages() {
   pass("Public/app shell pages load.");
 }
 
-async function checkRemovedPublicEndpoints() {
-  log("Checking removed public self-serve endpoints.");
-  const checks = [
-    { path: "/api/contact-requests", init: { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" } },
-    { path: "/api/signup", init: { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" } },
-  ];
+async function checkPublicFunnelEndpoints() {
+  log("Checking public demo intake and retired self-serve signup.");
+  const invalidContact = await fetchRaw("/api/contact-requests", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert(invalidContact.status === 400, `/api/contact-requests should validate an empty request with 400, got ${invalidContact.status}.`);
 
-  for (const check of checks) {
-    const response = await fetchRaw(check.path, check.init);
-    assert(response.status === 404, `${check.path} should return 404 after public-release cleanup, got ${response.status}.`);
-  }
+  const signup = await fetchRaw("/api/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert(signup.status === 404, `/api/signup should remain unavailable with 404, got ${signup.status}.`);
 
-  pass("Removed public endpoints return 404.");
+  pass("Public demo intake is active and self-serve signup remains unavailable.");
 }
 
 async function loginOwner() {
@@ -218,7 +222,7 @@ async function main() {
   console.log(`Liara staging validation target: ${baseUrl}`);
   await checkHealth();
   await checkPublicPages();
-  await checkRemovedPublicEndpoints();
+  await checkPublicFunnelEndpoints();
   const loggedIn = await loginOwner();
   if (loggedIn) await checkDocumentAndTrackingSmoke();
   console.log("\nLiara staging validation passed.");

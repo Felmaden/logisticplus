@@ -27,6 +27,11 @@
 }
 
 @layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+
   :root {
     --background: #f7fbff;
     --foreground: #0f172a;
@@ -108,6 +113,352 @@
   background-image: none;
 }
 
+.landing-grid {
+  background-image:
+    linear-gradient(rgba(37, 99, 235, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 99, 235, 0.055) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: linear-gradient(to bottom, black, transparent 92%);
+}
+
+.landing-page section[id] {
+  scroll-margin-top: 5rem;
+}
+
+.landing-nav {
+  box-shadow: 0 12px 34px rgba(15, 23, 42, 0.05);
+  transition: box-shadow 240ms ease, background-color 240ms ease;
+}
+
+.landing-page[data-motion-ready="true"] .landing-reveal:not(.is-visible) {
+  opacity: 0;
+  transform: translateY(22px);
+}
+
+.landing-reveal {
+  --landing-reveal-delay: 0ms;
+  transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1), transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-page[data-motion-ready="true"] .landing-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: var(--landing-reveal-delay);
+}
+
+.landing-card {
+  transition: transform 260ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 260ms ease, border-color 220ms ease, background-color 220ms ease;
+}
+
+@media (hover: hover) {
+  .landing-card:hover {
+    border-color: rgba(96, 165, 250, 0.75);
+    box-shadow: 0 18px 42px rgba(37, 99, 235, 0.12);
+    transform: translateY(-6px);
+  }
+
+  .landing-product-window:hover {
+    animation-play-state: paused;
+    transform: translateY(-7px) rotateX(1deg);
+  }
+}
+
+.landing-page main > section:first-child img[src*="logisticplus-hero-port"] {
+  animation: landing-hero-image 24s ease-in-out infinite alternate;
+  filter: saturate(0.88) contrast(1.04);
+  transform: scale(1.06);
+  will-change: transform;
+}
+
+.landing-hero-orb {
+  position: absolute;
+  z-index: -5;
+  width: 15rem;
+  height: 15rem;
+  border-radius: 9999px;
+  pointer-events: none;
+  filter: blur(2px);
+  opacity: 0.52;
+  animation: landing-orb-drift 13s ease-in-out infinite;
+}
+
+.landing-hero-orb-one {
+  top: 8%;
+  right: 12%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.26), transparent 68%);
+}
+
+.landing-hero-orb-two {
+  bottom: 8%;
+  left: 10%;
+  width: 11rem;
+  height: 11rem;
+  animation-delay: -5s;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.18), transparent 70%);
+}
+
+.landing-product-window {
+  transform-style: preserve-3d;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 420ms ease;
+}
+
+.landing-float {
+  animation: landing-float 7s ease-in-out infinite;
+  will-change: transform;
+}
+
+.landing-reveal.landing-float:not(.is-visible) {
+  animation: none;
+}
+
+.landing-reveal.landing-float.is-visible {
+  animation: landing-float 7s ease-in-out infinite;
+}
+
+.landing-float-delayed {
+  animation-delay: -3.4s;
+}
+
+.landing-sparkle {
+  animation: landing-sparkle 2.8s ease-in-out infinite;
+}
+
+.landing-status-pulse {
+  animation: landing-status-pulse 3.8s ease-in-out infinite;
+}
+
+.landing-progress {
+  width: 66.666667%;
+  transform-origin: right center;
+  animation: landing-progress 1.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-metric-card {
+  position: relative;
+  overflow: hidden;
+  transition: border-color 240ms ease, box-shadow 260ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-metric-card::after {
+  position: absolute;
+  right: 1rem;
+  bottom: 0;
+  left: 1rem;
+  height: 2px;
+  border-radius: 9999px;
+  content: "";
+  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.72), transparent);
+  transform: scaleX(0.35);
+  transition: transform 320ms ease;
+}
+
+.landing-chat-preview {
+  isolation: isolate;
+}
+
+.landing-chat-preview::before {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  content: "";
+  border-radius: inherit;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.landing-chat-preview.is-visible .landing-chat-message {
+  animation: landing-chat-message 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-chat-preview.is-visible .landing-chat-message:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.landing-chat-preview.is-visible .landing-chat-message:nth-child(3) {
+  animation-delay: 260ms;
+}
+
+.landing-chat-preview.is-visible .landing-chat-message:nth-child(4) {
+  animation-delay: 380ms;
+}
+
+.landing-chat-typing span {
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 9999px;
+  background: #94a3b8;
+  animation: landing-chat-typing 1.25s ease-in-out infinite;
+}
+
+.landing-chat-typing span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.landing-chat-typing span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+.landing-cta-primary {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition: transform 220ms ease, box-shadow 220ms ease, filter 220ms ease;
+}
+
+.landing-cta-primary::after {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  content: "";
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, 0.24) 50%, transparent 75%);
+  transform: translateX(-130%);
+  transition: transform 650ms ease;
+}
+
+.landing-cta-primary > * {
+  position: relative;
+  z-index: 1;
+}
+
+@media (hover: hover) {
+  .landing-metric-card:hover {
+    border-color: rgba(96, 165, 250, 0.72);
+    box-shadow: 0 16px 38px rgba(37, 99, 235, 0.1);
+    transform: translateY(-4px);
+  }
+
+  .landing-metric-card:hover::after {
+    transform: scaleX(1);
+  }
+
+  .landing-cta-primary:hover {
+    filter: brightness(1.04);
+    transform: translateY(-2px);
+  }
+
+  .landing-cta-primary:hover::after {
+    transform: translateX(130%);
+  }
+}
+
+@keyframes landing-hero-image {
+  0%,
+  100% {
+    transform: scale(1.06) translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: scale(1.12) translate3d(1%, -0.8%, 0);
+  }
+}
+
+@keyframes landing-orb-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    transform: translate3d(12px, -14px, 0) scale(1.08);
+  }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotateX(0deg);
+  }
+
+  50% {
+    transform: translate3d(0, -9px, 0) rotateX(0.35deg);
+  }
+}
+
+@keyframes landing-sparkle {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(1) rotate(0deg);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.12) rotate(8deg);
+  }
+}
+
+@keyframes landing-status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.08);
+  }
+}
+
+@keyframes landing-progress {
+  from {
+    width: 0;
+  }
+
+  to {
+    width: 66.666667%;
+  }
+}
+
+@keyframes landing-chat-message {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes landing-chat-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.45;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-nav,
+  .landing-reveal,
+  .landing-card,
+  .landing-product-window,
+  .landing-cta-primary,
+  .landing-page[data-motion-ready="true"] .landing-reveal,
+  .landing-page[data-motion-ready="true"] .landing-reveal.is-visible {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+
+  .landing-hero-orb,
+  .landing-chat-message,
+  .landing-chat-typing span,
+  .landing-sparkle,
+  .landing-status-pulse,
+  .landing-progress,
+  .landing-page main > section:first-child img[src*="logisticplus-hero-port"] {
+    animation: none !important;
+  }
+}
+
 .login-shell {
   height: 100vh;
   height: 100dvh;
@@ -124,6 +475,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   .login-hero-port-bg {
     animation: none;
   }

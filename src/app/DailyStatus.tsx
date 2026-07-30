@@ -56,6 +56,7 @@ import {
   SHIPMENT_STATUS_OPTIONS,
   shipmentStatusLabel,
 } from "@/src/shared/shipment-statuses.js";
+import { isImportShipShipmentV2Flow } from "@/src/shared/shipment-v2-types.js";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/src/store/useAppStore";
 import type { BusinessEntityContact, CommercialCard, Customer, DailyStatusBoardRow, DailyStatusPatch, MalvaniProfile, Shipment, ShipmentStatus } from "@/src/types";
@@ -105,6 +106,11 @@ const v2CurrencyLabels: Record<string, string> = {
 const v2CustomsTaxStatusLabels: Record<string, string> = {
   PAYABLE: "نیاز به پرداخت",
   GOOD_STANDING: "خوش حسابی",
+};
+
+const v2ShippingProviderLabels: Record<string, string> = {
+  SHIPPING_LINE: "لاین کشتیرانی",
+  FORWARDER: "فورواردر",
 };
 
 function padDatePart(value: string) {
@@ -1032,7 +1038,6 @@ function DailyBaseInfoGrid({
               </DialogHeader>
               <div className="grid gap-1.5">
                 <DialogFactRow label="شماره کارت" value={linkedCommercialCard?.cardNumber || row.commercialCard?.cardNumber} />
-                <DialogFactRow label="تاریخ صدور" value={formatShamsiDateForDialog(linkedCommercialCard?.issueDate)} />
                 <DialogFactRow label="تاریخ انقضا" value={formatShamsiDateForDialog(linkedCommercialCard?.expirationDate)} />
                 <DialogFactRow label="شناسه ملی" value={linkedCommercialCard?.nationalId} />
                 <DialogFactRow label="اسناد" value={toPersianDigits(linkedCommercialCard?.documents?.length || 0)} />
@@ -1202,6 +1207,41 @@ function DailyDeclarationKootajPanel({ row }: { row: DailyStatusBoardRow }) {
   );
 }
 
+function DailyShippingPanel({ row }: { row: DailyStatusBoardRow }) {
+  const shipping = row.v2Profile?.sections?.shipping || {};
+  const containerRows = shipping.containerRows || [];
+  const providerLabel = shipping.providerType ? v2ShippingProviderLabels[shipping.providerType] || shipping.providerType : "";
+  return (
+    <div className="space-y-2">
+      <div className="grid gap-2 md:grid-cols-2">
+        <ReadField label="نوع ارائه‌دهنده حمل" value={providerLabel} />
+        <ReadField
+          label={providerLabel ? `نام ${providerLabel}` : "نام لاین کشتیرانی / فورواردر"}
+          value={shipping.providerName}
+        />
+      </div>
+      {containerRows.length ? (
+        <div className="grid gap-2">
+          {containerRows.map((container, index) => (
+            <div key={`${container.containerNumber}-${index}`} className="rounded-lg border border-border bg-muted/20 p-2">
+              <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-4">
+                <ReadField label="شماره کانتینر" value={<span dir="ltr">{displayValue(container.containerNumber)}</span>} />
+                <ReadField label="تاریخ تخلیه" value={v2DisplayDate(container.dischargeDate)} />
+                <ReadField label="تاریخ ترخیصیه" value={v2DisplayDate(container.deliveryOrderDate)} />
+                <ReadField label="تاریخ اعلامیه ورود" value={v2DisplayDate(container.arrivalNoticeDate)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-border bg-muted/20 p-2.5 text-[11px] font-bold text-muted-foreground">
+          اطلاعات کانتینری ثبت نشده است.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DailyPermitsPanel({ row }: { row: DailyStatusBoardRow }) {
   const permitRows = row.v2Profile?.sections?.permits?.permitRows || [];
   if (!permitRows.length) {
@@ -1301,6 +1341,11 @@ function DailyKootajV2Details({
       <DailyV2DetailSection row={row} surface={surface} id="declarationKootaj" title="اظهار و کوتاژ">
         <DailyDeclarationKootajPanel row={row} />
       </DailyV2DetailSection>
+      {isImportShipShipmentV2Flow(row.v2Profile?.flowCode) ? (
+        <DailyV2DetailSection row={row} surface={surface} id="shipping" title="کشتیرانی">
+          <DailyShippingPanel row={row} />
+        </DailyV2DetailSection>
+      ) : null}
       <DailyV2DetailSection row={row} surface={surface} id="permits" title="مجوزها">
         <DailyPermitsPanel row={row} />
       </DailyV2DetailSection>

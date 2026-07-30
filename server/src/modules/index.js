@@ -2,6 +2,7 @@ export * from "./audit/index.js";
 export * from "./auth/index.js";
 export * from "./billing/index.js";
 export * from "./business-entities/index.js";
+export * from "./contact-requests/index.js";
 export * from "./customers/index.js";
 export * from "./daily-status/index.js";
 export * from "./documents/index.js";

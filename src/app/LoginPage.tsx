@@ -23,7 +23,12 @@ export default function LoginPage() {
 
     try {
       await loginWithPassword(email, password, rememberMe);
-      navigate("/dashboard");
+      const pendingNotificationTarget = window.sessionStorage.getItem("logisticplus.notification.returnTo");
+      const safeTarget = pendingNotificationTarget && /^\/(?:chat|shipments|tasks|profile)(?:\/|[?#]|$)/.test(pendingNotificationTarget)
+        ? pendingNotificationTarget
+        : "/dashboard";
+      window.sessionStorage.removeItem("logisticplus.notification.returnTo");
+      navigate(safeTarget);
     } catch {
       setError("ایمیل یا رمز عبور درست نیست.");
     } finally {

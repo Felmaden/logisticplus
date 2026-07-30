@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Loader2, MessageSquare, Send } from "lucide-react";
+import { Download, FileIcon, Forward, Loader2, MessageSquare, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,20 @@ type ShipmentChatMessage = {
   senderName: string;
   body?: string;
   content?: string;
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    fileSize: string;
+    attachmentType: "image" | "document" | "audio";
+    previewUrl?: string;
+    downloadUrl?: string;
+    deletedAt?: string | null;
+  }>;
+  forwardedFrom?: {
+    threadId: string;
+    threadName: string;
+    canOpenThread?: boolean;
+  };
   createdAt: string;
 };
 
@@ -67,6 +81,7 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
   const latestMessageBatchRef = React.useRef<{ length: number; lastMessageId: string }>({ length: 0, lastMessageId: "" });
   const pendingBottomScrollRef = React.useRef<ScrollBehavior | null>(null);
   const initialBottomScrolledThreadRef = React.useRef("");
+  const readMarkRef = React.useRef("");
 
   const loadMessages = React.useCallback(async (
     threadId: string,
@@ -151,6 +166,28 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
     if (list.scrollTop <= SHIPMENT_CHAT_HISTORY_TOP_THRESHOLD_PX) {
       void loadOlderMessages();
     }
+    if (isMessageListNearBottom()) {
+      window.requestAnimationFrame(() => maybeMarkThreadRead());
+    }
+  };
+
+  const maybeMarkThreadRead = () => {
+    const threadId = thread?.id;
+    const messageId = latestMessageBatchRef.current.lastMessageId;
+    if (!threadId || !messageId) return;
+    if (document.visibilityState !== "visible" || !document.hasFocus() || !isMessageListNearBottom()) return;
+    const key = `${threadId}:${messageId}`;
+    if (readMarkRef.current === key) return;
+    readMarkRef.current = key;
+    fetch(`/api/chat/threads/${encodeURIComponent(threadId)}/read`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId }),
+    }).then((response) => {
+      if (!response.ok) readMarkRef.current = "";
+    }).catch(() => {
+      readMarkRef.current = "";
+    });
   };
 
   React.useEffect(() => {
@@ -214,6 +251,21 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
           }
           return [...items, message];
         });
+        return;
+      }
+      if (incoming.type === "message.updated" && incoming.payload?.threadId === thread.id) {
+        const { messageId, attachment } = incoming.payload;
+        if (!messageId || !attachment) return;
+        setMessages((items) => items.map((message) => {
+          if (message.id !== messageId) return message;
+          const attachments = message.attachments || [];
+          return {
+            ...message,
+            attachments: attachments.some((item) => item.id === attachment.id)
+              ? attachments.map((item) => item.id === attachment.id ? attachment : item)
+              : [...attachments, attachment],
+          };
+        }));
         return;
       }
       if (incoming.type === "message.ack") {
@@ -299,14 +351,19 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
   }, [messages, thread?.id]);
 
   React.useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    if (!thread?.id || !lastMessage) return;
-    fetch(`/api/chat/threads/${encodeURIComponent(thread.id)}/read`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messageId: lastMessage.id }),
-    }).catch(() => {});
+    const timer = window.setTimeout(maybeMarkThreadRead, 80);
+    return () => window.clearTimeout(timer);
   }, [messages, thread?.id]);
+
+  React.useEffect(() => {
+    const markIfEligible = () => maybeMarkThreadRead();
+    window.addEventListener("focus", markIfEligible);
+    document.addEventListener("visibilitychange", markIfEligible);
+    return () => {
+      window.removeEventListener("focus", markIfEligible);
+      document.removeEventListener("visibilitychange", markIfEligible);
+    };
+  }, [thread?.id]);
 
   if (!canUseChat) return null;
 
@@ -344,9 +401,66 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
     }
   };
 
+  const renderCompactAttachments = (message: ShipmentChatMessage) => {
+    const attachments = message.attachments || [];
+    if (!attachments.length) return null;
+    return (
+      <div className="mt-1.5 space-y-1.5" data-testid="shipment-chat-attachments">
+        {attachments.map((attachment) => {
+          if (attachment.deletedAt) {
+            return (
+              <div key={attachment.id} className="flex items-center gap-1.5 rounded-sm border border-border bg-muted/40 px-2 py-1.5 text-[9px] text-muted-foreground">
+                <FileIcon className="h-3.5 w-3.5" />
+                فایل حذف شده است
+              </div>
+            );
+          }
+          if (attachment.attachmentType === "audio" && attachment.previewUrl) {
+            return (
+              <audio
+                key={attachment.id}
+                controls
+                preload="metadata"
+                src={attachment.previewUrl}
+                className="h-8 w-full min-w-[12rem] max-w-full"
+                data-testid="shipment-chat-audio"
+              />
+            );
+          }
+          if (attachment.attachmentType === "image" && attachment.previewUrl) {
+            return (
+              <a key={attachment.id} href={attachment.previewUrl} target="_blank" rel="noreferrer" className="block">
+                <img
+                  src={attachment.previewUrl}
+                  alt={attachment.filename}
+                  className="max-h-32 max-w-full rounded-sm border border-border object-contain"
+                  loading="lazy"
+                />
+              </a>
+            );
+          }
+          return (
+            <a
+              key={attachment.id}
+              href={attachment.downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="flex min-w-0 items-center gap-2 rounded-sm border border-border bg-background px-2 py-1.5 text-[9px] hover:border-primary/40"
+            >
+              <FileIcon className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+              <span className="shrink-0 text-muted-foreground">{attachment.fileSize}</span>
+              <Download className="h-3.5 w-3.5 shrink-0" />
+            </a>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
-    <Card className="overflow-hidden rounded-2xl border-border/70 bg-card shadow-sm" data-testid="shipment-chat-panel">
-      <CardHeader className="border-b border-border/50 bg-muted/20 p-4">
+    <Card className="overflow-hidden rounded-lg border-border bg-card shadow-none" data-testid="shipment-chat-panel">
+      <CardHeader className="border-b border-border bg-muted/20 p-3">
         <CardTitle className="flex items-center justify-between gap-3 text-sm font-black">
           <span className="flex min-w-0 items-center gap-2">
             <MessageSquare className="h-4 w-4 shrink-0 text-primary" />
@@ -356,7 +470,7 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
             <Button
               type="button"
               variant="outline"
-              className="h-8 shrink-0 rounded-lg px-3 text-[11px] font-black"
+              className="h-8 shrink-0 rounded-sm px-3 text-[11px] font-black"
               onClick={() => navigate(`/chat?threadId=${encodeURIComponent(thread.id)}`)}
               data-testid="shipment-chat-full-link"
             >
@@ -365,8 +479,8 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3 p-4">
-        <div className="rounded-xl bg-muted/25 p-3">
+      <CardContent className="space-y-3 p-3">
+        <div className="rounded-md border border-border bg-muted/20 p-2.5">
           <div className="mb-2 flex items-center justify-between gap-3 text-[11px] font-bold text-muted-foreground">
             <span className="truncate">محموله {thread?.shipmentCode || shipmentCode}</span>
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -384,15 +498,28 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
               const isMine = message.senderId === currentUser?.id;
               return (
                 <div key={message.id} className={cn("flex flex-col", isMine ? "items-start" : "items-end")}>
+                  {message.forwardedFrom && (
+                    <button
+                      type="button"
+                      disabled={!message.forwardedFrom.canOpenThread}
+                      onClick={() => message.forwardedFrom?.canOpenThread && navigate(`/chat?threadId=${encodeURIComponent(message.forwardedFrom.threadId)}`)}
+                      className="mb-1 flex items-center gap-1 text-[9px] font-bold text-muted-foreground enabled:hover:text-primary"
+                      data-testid="shipment-chat-forwarded-from"
+                    >
+                      <Forward className="h-3 w-3" />
+                      ارسال‌شده از {message.forwardedFrom.threadName}
+                    </button>
+                  )}
                   {!isMine && <span className="mb-1 text-[10px] font-black text-muted-foreground">{message.senderName}</span>}
                   <div
                     className={cn(
-                      "max-w-[90%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-[11px] font-bold leading-5 [overflow-wrap:anywhere]",
-                      isMine ? "bg-primary text-primary-foreground" : "border border-border bg-background text-foreground"
+                      "max-w-[94%] whitespace-pre-wrap break-words rounded-sm border px-2.5 py-1.5 text-[11px] font-bold leading-5 [overflow-wrap:anywhere]",
+                      isMine ? "border-primary/25 bg-primary/[0.07] text-foreground" : "border-border bg-background text-foreground"
                     )}
                     data-testid="shipment-chat-message-bubble"
                   >
                     {shipmentChatMessageText(message)}
+                    {renderCompactAttachments(message)}
                   </div>
                   <span className="mt-1 px-1 text-[10px] font-bold text-muted-foreground">
                     {shipmentChatMessageTimestamp(message.createdAt)}
@@ -415,13 +542,13 @@ export function ShipmentChatPanel({ shipmentId, shipmentCode }: { shipmentId: st
             disabled={!thread?.id || isLoading}
             maxLength={3000}
             placeholder="پیام داخلی محموله..."
-            className="h-10 min-w-0 flex-1 rounded-lg text-xs font-bold"
+            className="h-10 min-w-0 flex-1 rounded-sm text-xs font-bold"
             data-testid="shipment-chat-message-input"
           />
           <Button
             type="submit"
             size="icon"
-            className="h-10 w-10 shrink-0 rounded-lg"
+            className="h-10 w-10 shrink-0 rounded-sm"
             disabled={!thread?.id || !draft.trim() || isSending || isLoading}
             data-testid="shipment-chat-send-button"
             aria-label="ارسال پیام محموله"

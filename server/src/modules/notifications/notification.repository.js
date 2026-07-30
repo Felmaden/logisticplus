@@ -33,6 +33,85 @@ export function toUiNotification(row) {
   };
 }
 
+export function isWebPushEnabled(env = process.env) {
+  return String(env.CHAT_PUSH_ENABLED || "").trim().toLowerCase() === "true";
+}
+
+export async function enqueueNotificationPushDeliveries(client, {
+  organizationId,
+  notificationId,
+  userId,
+} = {}) {
+  if (!isWebPushEnabled() || !organizationId || !notificationId || !userId) return 0;
+  const subscriptions = await client.query(
+    `SELECT id
+     FROM chat_push_subscriptions
+     WHERE organization_id = $1
+       AND user_id = $2
+       AND disabled_at IS NULL`,
+    [organizationId, userId]
+  );
+  let created = 0;
+  for (const subscription of subscriptions.rows) {
+    const result = await client.query(
+      `INSERT INTO notification_push_deliveries (
+         id, organization_id, notification_id, subscription_id, status, next_attempt_at, created_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW(), NOW())
+       ON CONFLICT (notification_id, subscription_id) DO NOTHING`,
+      [crypto.randomUUID(), organizationId, notificationId, subscription.id]
+    );
+    created += result.rowCount;
+  }
+  return created;
+}
+
+export async function createCanonicalNotification(client, {
+  organizationId,
+  userId,
+  title,
+  body = null,
+  type = "INFO",
+  sourceType = null,
+  sourceId = null,
+  link = "/dashboard",
+  eventKey = null,
+} = {}) {
+  if (!organizationId || !userId || !title) return null;
+  const result = await client.query(
+    `INSERT INTO notifications (
+       id, organization_id, user_id, title, body, type, source_type, source_id,
+       legacy_data, event_key, created_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, NOW())
+     ON CONFLICT (organization_id, user_id, event_key)
+       WHERE event_key IS NOT NULL
+     DO NOTHING
+     RETURNING *`,
+    [
+      crypto.randomUUID(),
+      organizationId,
+      userId,
+      title,
+      body,
+      normalizeNotificationType(type),
+      sourceType,
+      sourceId,
+      JSON.stringify({ link }),
+      eventKey,
+    ]
+  );
+  const notification = result.rows[0] || null;
+  if (notification) {
+    await enqueueNotificationPushDeliveries(client, {
+      organizationId,
+      notificationId: notification.id,
+      userId,
+    });
+  }
+  return notification;
+}
+
 export async function listNotifications(pool, { userId, organizationId, includeRead = false, limit = 50 } = {}) {
   const values = [userId];
   const organizationFilter = organizationScopeClause(
@@ -78,24 +157,53 @@ export async function createShipmentCreatedNotifications(client, {
   );
 
   for (const recipient of recipients.rows) {
-    await client.query(
-      `INSERT INTO notifications (
-         id, organization_id, user_id, title, body, type, source_type, source_id, legacy_data, created_at
-       )
-       VALUES ($1, $2, $3, $4, $5, 'INFO', 'SHIPMENT', $6, $7::jsonb, NOW())`,
-      [
-        crypto.randomUUID(),
-        organizationId,
-        recipient.id,
-        "محموله جدید ثبت شد",
-        `محموله ${shipmentCode} به سامانه اضافه شد.`,
-        shipmentId,
-        JSON.stringify({ link: `/shipments/${shipmentId}` }),
-      ]
-    );
+    await createCanonicalNotification(client, {
+      organizationId,
+      userId: recipient.id,
+      title: "محموله جدید ثبت شد",
+      body: `محموله ${shipmentCode} به سامانه اضافه شد.`,
+      sourceType: "SHIPMENT",
+      sourceId: shipmentId,
+      link: `/shipments/${shipmentId}`,
+      eventKey: `shipment-created:${shipmentId}`,
+    });
   }
 
   return recipients.rowCount;
+}
+
+export async function createShipmentUpdateNotifications(client, {
+  organizationId,
+  actorUserId,
+  shipmentId,
+  shipmentCode,
+  status,
+  eventKey,
+} = {}) {
+  const recipients = await client.query(
+    `SELECT id
+     FROM app_users
+     WHERE organization_id = $1
+       AND status = 'active'
+       AND id <> COALESCE($2, '')
+       AND COALESCE(notification_preferences->>'shipmentUpdates', 'true') <> 'false'`,
+    [organizationId, actorUserId || null]
+  );
+  let created = 0;
+  for (const recipient of recipients.rows) {
+    const notification = await createCanonicalNotification(client, {
+      organizationId,
+      userId: recipient.id,
+      title: "وضعیت محموله به‌روزرسانی شد",
+      body: `وضعیت محموله ${shipmentCode || ""}${status ? ` به ${status}` : ""} تغییر کرد.`,
+      sourceType: "SHIPMENT_UPDATE",
+      sourceId: shipmentId,
+      link: `/shipments/${shipmentId}`,
+      eventKey,
+    });
+    if (notification) created += 1;
+  }
+  return created;
 }
 
 export async function markNotificationRead(pool, notificationId, { userId, organizationId } = {}) {

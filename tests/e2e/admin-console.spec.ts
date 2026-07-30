@@ -87,22 +87,19 @@ test.describe.serial("separate platform admin console", () => {
     await expect(page.getByTestId("admin-errors-panel")).toBeVisible();
     await expect(page.getByTestId("admin-health-panel")).toBeVisible();
 
-    for (const section of ["overview", "organizations", "subscriptions", "billing", "errors"]) {
+    for (const section of ["overview", "organizations", "contacts", "subscriptions", "billing", "errors"]) {
       await page.getByTestId(`admin-nav-${section}`).first().click();
       await expect(page.getByTestId(`admin-section-${section}`)).toBeVisible();
       await expectNoHorizontalOverflow(page);
     }
   });
 
-  test("does not expose retired signup request or contact modules", async ({ page }) => {
+  test("keeps retired signup review modules unavailable", async ({ page }) => {
     await loginViaUi(page);
     await page.goto("/platform-admin");
     await expect(page.getByTestId("admin-nav-requests")).toHaveCount(0);
-    await expect(page.getByTestId("admin-nav-contacts")).toHaveCount(0);
     await expect(page.getByTestId("admin-signups-panel")).toHaveCount(0);
-    await expect(page.getByTestId("admin-contacts-panel")).toHaveCount(0);
     await expect(page.getByTestId("admin-section-requests")).toHaveCount(0);
-    await expect(page.getByTestId("admin-section-contacts")).toHaveCount(0);
   });
 
   test("is responsive on mobile without console errors or horizontal overflow", async ({ browser }) => {
